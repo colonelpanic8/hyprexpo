@@ -5,6 +5,7 @@
 #include "globals.hpp"
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
+#include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <vector>
@@ -34,6 +35,7 @@ class COverview {
     // close without a selection
     void          close(bool switchToSelection = true);
     void          selectHoveredWorkspace();
+    bool          selectWorkspaceByID(int64_t workspaceID);
     int64_t       selectedWorkspaceID() const;
 
     bool          blockOverviewRendering = false;
@@ -47,6 +49,8 @@ class COverview {
         int64_t                  workspaceID = -1;
         PHLWORKSPACE             pWorkspace;
         CBox                     box;
+        SP<Render::ITexture>     labelTex;
+        Vector2D                 labelSizePx;
     };
 
   private:
@@ -80,8 +84,9 @@ class COverview {
     CHyprSignalListener          touchMoveHook;
     CHyprSignalListener          touchDownHook;
 
-    bool                         swipe             = false;
-    bool                         swipeWasCommenced = false;
+    bool                         swipe                = false;
+    bool                         swipeWasCommenced    = false;
+    bool                         showWorkspaceNumbers = false;
 
     friend class COverviewPassElement;
 };
