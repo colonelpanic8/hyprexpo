@@ -115,10 +115,33 @@ static SDispatchResult bringWindowFromWorkspace(int64_t sourceWorkspaceID) {
     return {};
 }
 
+static bool isSingleDigitWorkspaceArg(const std::string& arg) {
+    return arg.size() == 1 && arg[0] >= '1' && arg[0] <= '9';
+}
+
+static SDispatchResult changeToSingleDigitWorkspace(const std::string& arg) {
+    const auto WORKSPACEID = arg[0] - '0';
+
+    if (g_pOverview) {
+        if (g_pOverview->selectWorkspaceByID(WORKSPACEID)) {
+            g_pOverview->close();
+            return {};
+        }
+
+        g_pOverview->close(false);
+    }
+
+    Config::Actions::changeWorkspace(arg);
+    return {};
+}
+
 static SDispatchResult onExpoDispatcher(std::string arg) {
 
     if (g_pOverview && g_pOverview->m_isSwiping)
         return {.success = false, .error = "already swiping"};
+
+    if (isSingleDigitWorkspaceArg(arg))
+        return changeToSingleDigitWorkspace(arg);
 
     if (arg == "select") {
         if (g_pOverview) {
@@ -324,6 +347,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:bg_col", "background color", 0xFF111111));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:workspace_method", "workspace method", "center current"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:skip_empty", "skip empty workspaces", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:max_workspace", "maximum generated workspace", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:show_workspace_numbers", "show workspace numbers", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:workspace_number_color", "workspace number color", 0xFFFFFFFF));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", 200));
 
     return {"hyprexpo", "A plugin for an overview", "Vaxry", "1.0"};

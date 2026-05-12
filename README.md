@@ -28,6 +28,9 @@ gap_size | number | gap between desktops | `5`
 bg_col | color | color in gaps (between desktops) | `rgb(000000)`
 workspace_method | [center/first] [workspace] | position of the desktops | `center current`
 skip_empty | boolean | whether the grid displays workspaces sequentially by id using selector "r" (`false`) or skips empty workspaces using selector "m" (`true`) | `false`
+max_workspace | number | highest normal workspace to show when `skip_empty` is `false`; `0` disables the limit | `0`
+show_workspace_numbers | boolean | show numeric labels for workspaces | `false`
+workspace_number_color | color | color of workspace number labels | `rgb(ffffff)`
 gesture_distance | number | how far is the max for the gesture | `300`
 
 ### Keywords
@@ -46,6 +49,8 @@ Example:
 ```bash
 # This will toggle HyprExpo when SUPER+g is pressed
 bind = SUPER, g, hyprexpo:expo, toggle
+# This will switch to workspace 1, using the overview animation if it is open
+bind = SUPER, 1, hyprexpo:expo, 1
 ```
 
 Lua config:
@@ -58,6 +63,9 @@ hl.config({
             bg_col = "rgb(111111)",
             workspace_method = "center current",
             skip_empty = false,
+            max_workspace = 0,
+            show_workspace_numbers = false,
+            workspace_number_color = "rgb(ffffff)",
             gesture_distance = 300,
         },
     },
@@ -74,6 +82,7 @@ Here are a list of options you can use:
 toggle | displays if hidden, hide if displayed
 select | selects the hovered desktop
 bring | brings a window from the hovered desktop to the current desktop
+1-9 | switches to that workspace, using the overview animation if it is open
 off | hides the overview
 disable | same as `off`
 on | displays the overview
