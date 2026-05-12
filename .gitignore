@@ -1,4 +1,5 @@
 .direnv/
+.worktrees/
 result
 result-*
 build/
