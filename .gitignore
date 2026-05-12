@@ -1,0 +1,8 @@
+.direnv/
+result
+result-*
+build/
+cmake-build-*/
+*.so
+*.o
+*.d
