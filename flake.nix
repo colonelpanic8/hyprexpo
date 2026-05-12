@@ -33,12 +33,12 @@
           hyprexpo = final.callPackage ./default.nix {};
         };
 
-      hyprexpo = final.hyprlandPlugins.hyprexpo;
+      inherit (final.hyprlandPlugins) hyprexpo;
     };
 
     packages = eachSystem (system: {
       default = self.packages.${system}.hyprexpo;
-      hyprexpo = pkgsFor.${system}.hyprlandPlugins.hyprexpo;
+      inherit (pkgsFor.${system}.hyprlandPlugins) hyprexpo;
     });
 
     checks = eachSystem (system: let
@@ -47,7 +47,7 @@
       inherit (self.packages.${system}) hyprexpo;
 
       format =
-        pkgs.runCommandNoCC "hyprexpo-format-check"
+        pkgs.runCommand "hyprexpo-format-check"
         {
           src = lib.cleanSource ./.;
           nativeBuildInputs = with pkgs; [
