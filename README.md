@@ -24,6 +24,7 @@ plugin {
         workspace_method = center current # [center/first] [workspace] e.g. first 1 or center m+1
 
         gesture_distance = 300 # how far is the "max" for the gesture
+        cancel_key = escape # key that cancels the overview without selecting a workspace
     }
 }
 ```
@@ -41,6 +42,7 @@ max_workspace | number | highest normal workspace to show when `skip_empty` is `
 show_workspace_numbers | boolean | show numeric labels for workspaces | `false`
 workspace_number_color | color | color of workspace number labels | `rgb(ffffff)`
 gesture_distance | number | how far is the max for the gesture | `300`
+cancel_key | string | key that cancels the overview without selecting a workspace; comma-separated keys are supported, and `none` disables it | `escape`
 
 ### Keywords
 
@@ -76,6 +78,7 @@ hl.config({
             show_workspace_numbers = false,
             workspace_number_color = "rgb(ffffff)",
             gesture_distance = 300,
+            cancel_key = "escape",
         },
     },
 })
@@ -91,6 +94,7 @@ Here are a list of options you can use:
 toggle | displays if hidden, hide if displayed
 select | selects the hovered desktop
 bring | brings a window from the hovered desktop to the current desktop
+cancel | hides the overview without selecting a workspace
 1-9 | switches to that workspace, using the overview animation if it is open
 off | hides the overview
 disable | same as `off`

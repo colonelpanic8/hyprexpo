@@ -6,6 +6,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
@@ -13,11 +14,16 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/input/trackpad/GestureTypes.hpp>
 #include <hyprland/src/managers/input/trackpad/TrackpadGestures.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <string_view>
 #include <lua.hpp>
+#include <xkbcommon/xkbcommon.h>
 #include <hyprutils/string/ConstVarList.hpp>
 using namespace Hyprutils::String;
 
@@ -119,6 +125,74 @@ static bool isSingleDigitWorkspaceArg(const std::string& arg) {
     return arg.size() == 1 && arg[0] >= '1' && arg[0] <= '9';
 }
 
+static std::string trim(std::string_view value) {
+    const auto first = value.find_first_not_of(" \t\n\r");
+    if (first == std::string_view::npos)
+        return "";
+
+    const auto last = value.find_last_not_of(" \t\n\r");
+    return std::string{value.substr(first, last - first + 1)};
+}
+
+static std::string lower(std::string value) {
+    std::ranges::transform(value, value.begin(), [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+static bool isCancelKeyDisabled(const std::string& keyName) {
+    const auto KEY = lower(keyName);
+    return KEY.empty() || KEY == "none" || KEY == "disabled" || KEY == "disable" || KEY == "off";
+}
+
+static bool keyNameMatchesKeysym(const std::string& keyName, xkb_keysym_t keysym) {
+    if (keyName.empty())
+        return false;
+
+    const auto CONFIGUREDKEYSYM = xkb_keysym_from_name(keyName.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
+    if (CONFIGUREDKEYSYM == XKB_KEY_NoSymbol)
+        return false;
+
+    return xkb_keysym_to_lower(keysym) == xkb_keysym_to_lower(CONFIGUREDKEYSYM);
+}
+
+static bool matchesCancelKey(xkb_keysym_t keysym) {
+    static const CConfigValue<Config::STRING> PCANCELKEY("plugin:hyprexpo:cancel_key");
+
+    const std::string                         keyConfigString = *PCANCELKEY;
+    std::string_view                          keyConfig       = keyConfigString;
+    while (true) {
+        const auto COMMA   = keyConfig.find(',');
+        const auto KEYNAME = trim(keyConfig.substr(0, COMMA));
+
+        if (isCancelKeyDisabled(KEYNAME))
+            return false;
+
+        if (keyNameMatchesKeysym(KEYNAME, keysym))
+            return true;
+
+        if (COMMA == std::string_view::npos)
+            return false;
+
+        keyConfig.remove_prefix(COMMA + 1);
+    }
+}
+
+static bool shouldCancelOverview(const IKeyboard::SKeyEvent& event) {
+    if (!g_pOverview || event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+        return false;
+
+    const auto KEYCODE  = event.keycode + 8;
+    const auto KEYBOARD = g_pSeatManager->m_keyboard.lock();
+
+    if (KEYBOARD && KEYBOARD->m_xkbState && matchesCancelKey(xkb_state_key_get_one_sym(KEYBOARD->m_xkbState, KEYCODE)))
+        return true;
+
+    if (KEYBOARD && KEYBOARD->m_xkbSymState && matchesCancelKey(xkb_state_key_get_one_sym(KEYBOARD->m_xkbSymState, KEYCODE)))
+        return true;
+
+    return false;
+}
+
 static SDispatchResult changeToSingleDigitWorkspace(const std::string& arg) {
     const auto WORKSPACEID = arg[0] - '0';
 
@@ -167,6 +241,11 @@ static SDispatchResult onExpoDispatcher(std::string arg) {
             g_pOverview       = std::make_unique<COverview>(Desktop::focusState()->monitor()->m_activeWorkspace);
             renderingOverview = false;
         }
+        return {};
+    }
+    if (arg == "cancel") {
+        if (g_pOverview)
+            g_pOverview->close(false);
         return {};
     }
 
@@ -337,6 +416,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g_pOverview->onPreRender();
     });
 
+    static auto PKEY = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+        if (!shouldCancelOverview(event))
+            return;
+
+        info.cancelled = true;
+        g_pOverview->close(false);
+    });
+
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:expo", ::onExpoDispatcher);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "expo", ::luaExpo);
 
@@ -351,6 +438,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:show_workspace_numbers", "show workspace numbers", 0));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:workspace_number_color", "workspace number color", 0xFFFFFFFF));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", 200));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:cancel_key", "cancel key", "escape"));
 
     return {"hyprexpo", "A plugin for an overview", "Vaxry", "1.0"};
 }
