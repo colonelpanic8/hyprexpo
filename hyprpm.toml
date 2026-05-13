@@ -1,0 +1,11 @@
+[repository]
+name = "hyprexpo"
+authors = ["Vaxry", "Ivan Malison"]
+
+[hyprexpo]
+description = "Hyprland workspaces overview plugin"
+authors = ["Vaxry", "Ivan Malison"]
+output = "hyprexpo.so"
+build = [
+    "make all",
+]

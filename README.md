@@ -3,8 +3,17 @@ HyprExpo is an overview plugin like Gnome, KDE or wf.
   
 ![HyprExpo](https://github.com/user-attachments/assets/e89df9d2-9800-4268-9929-239ad9bc3a54)
   
+## Installation
+
+```bash
+hyprpm add https://github.com/colonelpanic8/hyprexpo
+hyprpm enable hyprexpo
+hyprpm reload
+```
+
 ## Config
 A great start to configure this plugin would be adding this code to the `plugin` section of your hyprland configuration file:  
+
 ```ini
 # .config/hypr/hyprland.conf
 plugin {
