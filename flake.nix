@@ -60,8 +60,9 @@
 
     checks = eachSystem (system: let
       pkgs = pkgsFor.${system};
-    in {
       inherit (self.packages.${system}) hyprexpo;
+    in {
+      inherit hyprexpo;
 
       format =
         pkgs.runCommand "hyprexpo-format-check"
@@ -83,6 +84,46 @@
           alejandra --check *.nix
           deadnix --fail .
           statix check .
+
+          touch "$out"
+        '';
+
+      hyprpm-manifest =
+        pkgs.runCommand "hyprexpo-hyprpm-manifest-check"
+        {
+          src = lib.cleanSource ./.;
+          nativeBuildInputs =
+            [
+              pkgs.gnumake
+              pkgs.python3
+              hyprexpo.stdenv.cc
+            ]
+            ++ hyprexpo.nativeBuildInputs
+            ++ hyprexpo.buildInputs;
+        }
+        ''
+          cp -r "$src" src
+          chmod -R u+w src
+          cd src
+
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          manifest = tomllib.loads(Path("hyprpm.toml").read_text())
+
+          repository = manifest["repository"]
+          assert repository["name"] == "hyprexpo"
+          assert repository["authors"]
+
+          plugin = manifest["hyprexpo"]
+          assert plugin["output"] == "hyprexpo.so"
+          assert plugin["build"] == ["make all"]
+          assert plugin["authors"]
+          PY
+
+          make all
+          test -f hyprexpo.so
 
           touch "$out"
         '';
