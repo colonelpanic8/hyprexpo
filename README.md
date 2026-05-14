@@ -64,6 +64,9 @@ bind = SUPER, g, hyprexpo:expo, toggle
 bind = SUPER, 1, hyprexpo:expo, 1
 ```
 
+When the overview is already open, pressing a raw number key from `1` through `9`
+selects that workspace directly. Keypad numbers are supported as well.
+
 Lua config:
 ```lua
 hl.config({

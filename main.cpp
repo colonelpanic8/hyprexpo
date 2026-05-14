@@ -209,6 +209,63 @@ static SDispatchResult changeToSingleDigitWorkspace(const std::string& arg) {
     return {};
 }
 
+static std::string workspaceArgForKeysym(xkb_keysym_t keysym) {
+    switch (keysym) {
+        case XKB_KEY_1:
+        case XKB_KEY_KP_1: return "1";
+        case XKB_KEY_2:
+        case XKB_KEY_KP_2: return "2";
+        case XKB_KEY_3:
+        case XKB_KEY_KP_3: return "3";
+        case XKB_KEY_4:
+        case XKB_KEY_KP_4: return "4";
+        case XKB_KEY_5:
+        case XKB_KEY_KP_5: return "5";
+        case XKB_KEY_6:
+        case XKB_KEY_KP_6: return "6";
+        case XKB_KEY_7:
+        case XKB_KEY_KP_7: return "7";
+        case XKB_KEY_8:
+        case XKB_KEY_KP_8: return "8";
+        case XKB_KEY_9:
+        case XKB_KEY_KP_9: return "9";
+        default: return "";
+    }
+}
+
+static std::string workspaceArgForKeyEvent(const IKeyboard::SKeyEvent& event) {
+    if (!g_pOverview || event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+        return "";
+
+    const auto KEYCODE  = event.keycode + 8;
+    const auto KEYBOARD = g_pSeatManager->m_keyboard.lock();
+
+    if (KEYBOARD && KEYBOARD->m_xkbState) {
+        const auto ARG = workspaceArgForKeysym(xkb_state_key_get_one_sym(KEYBOARD->m_xkbState, KEYCODE));
+        if (!ARG.empty())
+            return ARG;
+    }
+
+    if (KEYBOARD && KEYBOARD->m_xkbSymState) {
+        const auto ARG = workspaceArgForKeysym(xkb_state_key_get_one_sym(KEYBOARD->m_xkbSymState, KEYCODE));
+        if (!ARG.empty())
+            return ARG;
+    }
+
+    return "";
+}
+
+static bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
+    if (g_pOverview && g_pOverview->m_isSwiping)
+        return false;
+
+    const auto ARG = workspaceArgForKeyEvent(event);
+    if (ARG.empty())
+        return false;
+
+    return changeToSingleDigitWorkspace(ARG).success;
+}
+
 static SDispatchResult onExpoDispatcher(std::string arg) {
 
     if (g_pOverview && g_pOverview->m_isSwiping)
@@ -417,6 +474,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
 
     static auto PKEY = Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
+        if (shouldSelectWorkspaceFromKey(event)) {
+            info.cancelled = true;
+            return;
+        }
+
         if (!shouldCancelOverview(event))
             return;
 
