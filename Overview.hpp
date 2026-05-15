@@ -2,7 +2,7 @@
 
 #define WLR_USE_UNSTABLE
 
-#include "globals.hpp"
+#include "Globals.hpp"
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/Texture.hpp>

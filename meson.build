@@ -18,10 +18,18 @@ add_project_arguments(
   ],
   language: 'cpp')
 
-globber = run_command('find', '.', '-name', '*.cpp', check: true)
-src = globber.stdout().strip().split('\n')
-
-hyprland = dependency('hyprland')
+src = [
+  'Config.cpp',
+  'Dispatchers.cpp',
+  'ExpoGesture.cpp',
+  'GestureKeyword.cpp',
+  'Hooks.cpp',
+  'LabelRenderer.cpp',
+  'Overview.cpp',
+  'OverviewPassElement.cpp',
+  'Plugin.cpp',
+  'WorkspaceLayout.cpp',
+]
 
 shared_module(meson.project_name(), src,
   dependencies: [

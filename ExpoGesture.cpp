@@ -1,6 +1,6 @@
 #include "ExpoGesture.hpp"
 
-#include "overview.hpp"
+#include "Overview.hpp"
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>

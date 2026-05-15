@@ -7,7 +7,18 @@ project(hyprexpo
 
 set(CMAKE_CXX_STANDARD 23)
 
-file(GLOB_RECURSE SRC "*.cpp")
+set(SRC
+    Config.cpp
+    Dispatchers.cpp
+    ExpoGesture.cpp
+    GestureKeyword.cpp
+    Hooks.cpp
+    LabelRenderer.cpp
+    Overview.cpp
+    OverviewPassElement.cpp
+    Plugin.cpp
+    WorkspaceLayout.cpp
+)
 
 add_library(hyprexpo SHARED ${SRC})
 
