@@ -18,6 +18,7 @@
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/managers/PointerManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -57,10 +58,55 @@ static void damageMonitor(WP<Hyprutils::Animation::CBaseAnimatedVariable> thispt
     g_pOverview->damage();
 }
 
+struct SWorkspacePreviewState {
+    bool     visible        = false;
+    bool     forceRendering = false;
+    float    alphaValue     = 1.F;
+    float    alphaGoal      = 1.F;
+    Vector2D offsetValue;
+    Vector2D offsetGoal;
+};
+
+static SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace) {
+    SWorkspacePreviewState state;
+    if (!workspace)
+        return state;
+
+    state.visible        = workspace->m_visible;
+    state.forceRendering = workspace->m_forceRendering;
+    state.alphaValue     = workspace->m_alpha->value();
+    state.alphaGoal      = workspace->m_alpha->goal();
+    state.offsetValue    = workspace->m_renderOffset->value();
+    state.offsetGoal     = workspace->m_renderOffset->goal();
+
+    workspace->m_visible        = true;
+    workspace->m_forceRendering = true;
+    workspace->m_alpha->setValueAndWarp(1.F);
+    *workspace->m_alpha = 1.F;
+    workspace->m_renderOffset->setValueAndWarp(Vector2D{});
+    *workspace->m_renderOffset = Vector2D{};
+
+    return state;
+}
+
+static void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state) {
+    if (!workspace)
+        return;
+
+    workspace->m_visible        = state.visible;
+    workspace->m_forceRendering = state.forceRendering;
+    workspace->m_alpha->setValueAndWarp(state.alphaValue);
+    *workspace->m_alpha = state.alphaGoal;
+    workspace->m_renderOffset->setValueAndWarp(state.offsetValue);
+    *workspace->m_renderOffset = state.offsetGoal;
+}
+
 COverview::~COverview() {
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
     images.clear(); // otherwise we get a vram leak
     Cursor::overrideController->unsetOverride(Cursor::CURSOR_OVERRIDE_UNKNOWN);
+    g_pPointerManager->resetCursorImage();
+    g_pInputManager->simulateMouseMovement();
     if (pMonitor)
         pMonitor->m_blurFBDirty = true;
 }
@@ -198,16 +244,14 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         if (PWORKSPACE) {
             image.pWorkspace            = PWORKSPACE;
             PMONITOR->m_activeWorkspace = PWORKSPACE;
-            g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-            PWORKSPACE->m_visible = true;
+            const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
 
             g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
 
-            PWORKSPACE->m_visible = false;
-            g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+            restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace.reset();
@@ -491,16 +535,14 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     if (PWORKSPACE) {
         pMonitor->m_activeWorkspace = PWORKSPACE;
-        g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-        PWORKSPACE->m_visible = true;
+        const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace = openSpecial;
 
         g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
 
-        PWORKSPACE->m_visible = false;
-        g_pDesktopAnimationManager->startAnimation(PWORKSPACE, CDesktopAnimationManager::ANIMATION_TYPE_OUT, false, true);
+        restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace.reset();
