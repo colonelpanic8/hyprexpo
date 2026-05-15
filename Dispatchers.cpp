@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <cctype>
 #include <lua.hpp>
-#include <optional>
 #include <string_view>
 #include <xkbcommon/xkbcommon.h>
 
@@ -206,23 +205,6 @@ bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
     return changeToSingleDigitWorkspace(ARG).success;
 }
 
-static std::optional<size_t> tokenToVisibleIndex(const std::string& token) {
-    if (token.size() != 1)
-        return std::nullopt;
-
-    const char c = token[0];
-    if (c >= '1' && c <= '9')
-        return c - '1';
-    if (c == '0')
-        return 9;
-    if (c >= 'a' && c <= 'z')
-        return 10 + c - 'a';
-    if (c >= 'A' && c <= 'Z')
-        return 10 + c - 'A';
-
-    return std::nullopt;
-}
-
 SDispatchResult onExpoDispatcher(std::string arg) {
     if (g_pOverview && g_pOverview->m_isSwiping)
         return {.success = false, .error = "already swiping"};
@@ -335,12 +317,9 @@ static SDispatchResult onKbSelectTokenDispatcher(std::string arg) {
     if (!g_pOverview)
         return {};
 
-    arg              = trimCopy(arg);
-    const auto index = tokenToVisibleIndex(arg);
-    if (!index)
-        return {.success = false, .error = "invalid token. expected 1-9, 0, or a-z"};
+    arg = trimCopy(arg);
 
-    if (!g_pOverview->selectVisibleIndex(*index))
+    if (!g_pOverview->selectVisibleToken(arg))
         return {.success = false, .error = "no visible workspace for token"};
 
     g_pOverview->close();

@@ -25,7 +25,9 @@ plugin {
         workspace_method = center current # [center/first] [workspace] e.g. first 1 or center m+1
 
         label_enable = false
-        label_text_mode = token # token, index, or id
+        label_text_mode = id # token, index, or id
+        selection_label_enable = false
+        selection_label_token_map = a,s,d,f,g,q,w,e,r,t,z,x,c,v,b
         border_width = 0
         border_color_current = rgb(66ccff)
         border_color_hover = rgb(aabbcc)
@@ -67,6 +69,12 @@ label_token_map | string | comma-separated token overrides for `label_text_mode 
 label_position | string | `top-left`, `top-right`, `bottom-left`, `bottom-right`, or `center` | `top-left`
 label_offset_x | number | label horizontal offset | `6`
 label_offset_y | number | label vertical offset | `6`
+selection_label_enable | boolean | show a separate selection-key label on each visible workspace | `false`
+selection_label_token_map | string | comma-separated tokens used by `hyprexpo:kb_select` when selection labels are enabled; empty entries are unselectable | `a,s,d,f,g,q,w,e,r,t,z,x,c,v,b`
+selection_label_position | string | `top-left`, `top-right`, `bottom-left`, `bottom-right`, or `center` | `top-right`
+selection_label_offset_x | number | selection label horizontal offset | `6`
+selection_label_offset_y | number | selection label vertical offset | `6`
+selection_label_color | color | selection label color | `rgb(ffcc66)`
 label_show | string | `always`, `hover`, `focus`, `hover+focus`, `current+focus`, or `never` | `always`
 label_font_size | number | label font size | `16`
 label_font_family | string | Pango font family | `Sans`
@@ -114,7 +122,7 @@ Keyboard navigation dispatchers are also available:
 | --- | --- | --- |
 `hyprexpo:kb_focus` | `left`, `right`, `up`, or `down` | move keyboard focus between visible tiles
 `hyprexpo:kb_confirm` | none | select the keyboard-focused tile
-`hyprexpo:kb_select` | `1-9`, `0`, or `a-z` | select by visible token
+`hyprexpo:kb_select` | token | select by visible token; uses `selection_label_token_map` when selection labels are enabled, otherwise `1-9`, `0`, then `a-z`
 `hyprexpo:kb_selecti` | number | select by 1-based visible index
 
 Lua config:
@@ -132,8 +140,10 @@ hl.config({
             show_workspace_numbers = false,
             workspace_number_color = "rgb(ffffff)",
             label_enable = false,
-            label_text_mode = "token",
+            label_text_mode = "id",
             label_token_map = "",
+            selection_label_enable = false,
+            selection_label_token_map = "a,s,d,f,g,q,w,e,r,t,z,x,c,v,b",
             gesture_distance = 300,
             cancel_key = "escape",
         },

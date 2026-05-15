@@ -44,6 +44,12 @@ void registerConfigValues() {
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_position", "label position", "top-left"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_offset_x", "label x offset", 6));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_offset_y", "label y offset", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:selection_label_enable", "show selection labels", 0));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:selection_label_token_map", "selection label tokens", "a,s,d,f,g,q,w,e,r,t,z,x,c,v,b"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:selection_label_position", "selection label position", "top-right"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:selection_label_offset_x", "selection label x offset", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:selection_label_offset_y", "selection label y offset", 6));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:selection_label_color", "selection label color", 0xFFFFCC66));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_show", "label visibility mode", "always"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_font_size", "label font size", 16));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_font_family", "label font family", "Sans"));

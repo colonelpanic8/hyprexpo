@@ -2,7 +2,9 @@
 #include "LabelRenderer.hpp"
 #include "WorkspaceLayout.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <optional>
 #define private   public
 #define protected public
 #include <hyprland/src/render/Renderer.hpp>
@@ -27,6 +29,39 @@
 #include "OverviewPassElement.hpp"
 
 using namespace Hyprutils::String;
+
+static std::string lowerCopy(std::string value) {
+    std::ranges::transform(value, value.begin(), [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+static std::string fallbackTokenForVisibleIndex(size_t visible) {
+    if (visible < 9)
+        return std::to_string(visible + 1);
+    if (visible == 9)
+        return "0";
+    if (visible < 36)
+        return std::string(1, (char)('a' + visible - 10));
+
+    return "";
+}
+
+static std::optional<size_t> fallbackTokenToVisibleIndex(const std::string& token) {
+    if (token.size() != 1)
+        return std::nullopt;
+
+    const char c = token[0];
+    if (c >= '1' && c <= '9')
+        return c - '1';
+    if (c == '0')
+        return 9;
+    if (c >= 'a' && c <= 'z')
+        return 10 + c - 'a';
+    if (c >= 'A' && c <= 'Z')
+        return 10 + c - 'A';
+
+    return std::nullopt;
+}
 
 static uint32_t framebufferFormatWithAlpha(uint32_t drmFormat) {
     const auto alphaFormat = NFormatUtils::alphaFormat(drmFormat);
@@ -363,6 +398,32 @@ bool COverview::selectVisibleIndex(size_t index) {
     }
 
     return false;
+}
+
+bool COverview::selectVisibleToken(const std::string& token) {
+    if (closing)
+        return false;
+
+    static const CConfigValue<Config::INTEGER> PSELECTLABEL("plugin:hyprexpo:selection_label_enable");
+    static const CConfigValue<Config::STRING>  PSELECTTOKENMAP("plugin:hyprexpo:selection_label_token_map");
+
+    const auto                                 TOKEN = lowerCopy(token);
+    if (*PSELECTLABEL) {
+        const std::string tokenMapConfig = *PSELECTTOKENMAP;
+        const auto        tokenMap       = tokenMapConfig.empty() ? std::vector<std::string>{} : splitCommaList(tokenMapConfig);
+
+        for (size_t i = 0; i < tokenMap.size(); ++i) {
+            if (tokenMap[i].empty() || lowerCopy(tokenMap[i]) != TOKEN)
+                continue;
+
+            return selectVisibleIndex(i);
+        }
+
+        return false;
+    }
+
+    const auto index = fallbackTokenToVisibleIndex(TOKEN);
+    return index && selectVisibleIndex(*index);
 }
 
 bool COverview::isTileValid(int id) const {
@@ -703,6 +764,12 @@ void COverview::fullRender() {
     static const CConfigValue<Config::STRING>  PLABELPOS("plugin:hyprexpo:label_position");
     static const CConfigValue<Config::INTEGER> PLABELOFFX("plugin:hyprexpo:label_offset_x");
     static const CConfigValue<Config::INTEGER> PLABELOFFY("plugin:hyprexpo:label_offset_y");
+    static const CConfigValue<Config::INTEGER> PSELECTLABELENABLE("plugin:hyprexpo:selection_label_enable");
+    static const CConfigValue<Config::STRING>  PSELECTLABELTOKENS("plugin:hyprexpo:selection_label_token_map");
+    static const CConfigValue<Config::STRING>  PSELECTLABELPOS("plugin:hyprexpo:selection_label_position");
+    static const CConfigValue<Config::INTEGER> PSELECTLABELOFFX("plugin:hyprexpo:selection_label_offset_x");
+    static const CConfigValue<Config::INTEGER> PSELECTLABELOFFY("plugin:hyprexpo:selection_label_offset_y");
+    static const CConfigValue<Config::INTEGER> PSELECTLABELCOL("plugin:hyprexpo:selection_label_color");
     static const CConfigValue<Config::STRING>  PLABELSHOW("plugin:hyprexpo:label_show");
     static const CConfigValue<Config::INTEGER> PLABELSIZE("plugin:hyprexpo:label_font_size");
     static const CConfigValue<Config::STRING>  PLABELFONT("plugin:hyprexpo:label_font_family");
@@ -768,72 +835,29 @@ void COverview::fullRender() {
         }
     }
 
-    const bool labelsEnabled = *PLABELENABLE || showWorkspaceNumbers;
-    if (labelsEnabled) {
-        const std::string tokenMapConfig = *PLABELTOKENMAP;
-        const auto        tokenMap       = tokenMapConfig.empty() ? std::vector<std::string>{} : splitCommaList(tokenMapConfig);
-        size_t            visible        = 0;
-        for (size_t id = 0; id < images.size(); ++id) {
-            auto& image = images[id];
-            if (image.workspaceID == WORKSPACE_INVALID)
-                continue;
+    const bool labelsEnabled          = *PLABELENABLE || showWorkspaceNumbers;
+    const bool selectionLabelsEnabled = *PSELECTLABELENABLE;
+    if (labelsEnabled || selectionLabelsEnabled) {
+        const std::string tokenMapConfig  = *PLABELTOKENMAP;
+        const auto        tokenMap        = tokenMapConfig.empty() ? std::vector<std::string>{} : splitCommaList(tokenMapConfig);
+        const std::string selectMapConfig = *PSELECTLABELTOKENS;
+        const auto        selectMap       = selectMapConfig.empty() ? std::vector<std::string>{} : splitCommaList(selectMapConfig);
+        size_t            visible         = 0;
 
-            const bool        isHover   = (int)id == hoveredID;
-            const bool        isFocus   = (int)id == kbFocusID;
-            const bool        isCurrent = (int)id == openedID;
-
-            const std::string showMode   = *PLABELSHOW;
-            const bool        shouldShow = showWorkspaceNumbers || showMode == "always" || (showMode == "hover" && isHover) || (showMode == "focus" && isFocus) ||
-                (showMode == "hover+focus" && (isHover || isFocus)) || (showMode == "current+focus" && (isCurrent || isFocus));
-            if (!shouldShow || (!showWorkspaceNumbers && showMode == "never")) {
-                ++visible;
-                continue;
-            }
-
-            std::string label;
-            const auto  labelMode = showWorkspaceNumbers ? std::string{"id"} : std::string{*PLABELMODE};
-            if (labelMode == "index")
-                label = std::to_string(visible + 1);
-            else if (labelMode == "token") {
-                if (visible < tokenMap.size())
-                    label = tokenMap[visible];
-                else if (visible < 9)
-                    label = std::to_string(visible + 1);
-                else if (visible == 9)
-                    label = "0";
-                else if (visible < 36)
-                    label = std::string(1, (char)('a' + visible - 10));
-            } else
-                label = std::to_string(image.workspaceID);
-
-            ++visible;
+        auto drawLabel = [&](COverview::SWorkspaceImage::SLabelTexture& cache, const std::string& label, uint64_t color, const std::string& position, int offsetX, int offsetY,
+                             const CBox& tileBox) {
             if (label.empty())
-                continue;
-
-            int      state = 0;
-            uint64_t color = showWorkspaceNumbers ? *PWORKSPACENUMCOL : *PLABELCOLDEFAULT;
-            if (!showWorkspaceNumbers && isFocus) {
-                state = 2;
-                color = *PLABELCOLFOCUS;
-            } else if (!showWorkspaceNumbers && isCurrent) {
-                state = 3;
-                color = *PLABELCOLCURRENT;
-            } else if (!showWorkspaceNumbers && isHover) {
-                state = 1;
-                color = *PLABELCOLHOVER;
-            }
+                return;
 
             const int fontSize = std::max(8, (int)*PLABELSIZE);
-            auto      tex      = ensureLabelTexture(image.labels[state], label, color, fontSize, *PLABELFONT, *PLABELBOLD, *PLABELITALIC);
-            if (!tex || tex->m_texID == 0 || image.labels[state].sizePx.x <= 0 || image.labels[state].sizePx.y <= 0)
-                continue;
+            auto      tex      = ensureLabelTexture(cache, label, color, fontSize, *PLABELFONT, *PLABELBOLD, *PLABELITALIC);
+            if (!tex || tex->m_texID == 0 || cache.sizePx.x <= 0 || cache.sizePx.y <= 0)
+                return;
 
-            const Vector2D labelSize = image.labels[state].sizePx;
+            const Vector2D labelSize = cache.sizePx;
             CBox           labelBox  = {0, 0, labelSize.x, labelSize.y};
-            const CBox&    tileBox   = tileBoxes[id];
-            const double   offX      = *PLABELOFFX * pMonitor->m_scale;
-            const double   offY      = *PLABELOFFY * pMonitor->m_scale;
-            const auto     position  = std::string{*PLABELPOS};
+            const double   offX      = offsetX * pMonitor->m_scale;
+            const double   offY      = offsetY * pMonitor->m_scale;
 
             if (position == "top-left") {
                 labelBox.x = tileBox.x + offX;
@@ -864,6 +888,54 @@ void COverview::fullRender() {
             }
 
             Render::GL::g_pHyprOpenGL->renderTexture(tex, labelBox, {.a = 1.0});
+        };
+
+        for (size_t id = 0; id < images.size(); ++id) {
+            auto& image = images[id];
+            if (image.workspaceID == WORKSPACE_INVALID)
+                continue;
+
+            const bool        isHover   = (int)id == hoveredID;
+            const bool        isFocus   = (int)id == kbFocusID;
+            const bool        isCurrent = (int)id == openedID;
+
+            const std::string showMode   = *PLABELSHOW;
+            const bool        shouldShow = showWorkspaceNumbers || showMode == "always" || (showMode == "hover" && isHover) || (showMode == "focus" && isFocus) ||
+                (showMode == "hover+focus" && (isHover || isFocus)) || (showMode == "current+focus" && (isCurrent || isFocus));
+            const CBox& tileBox = tileBoxes[id];
+
+            if (labelsEnabled && shouldShow && (showWorkspaceNumbers || showMode != "never")) {
+                std::string label;
+                const auto  labelMode = showWorkspaceNumbers ? std::string{"id"} : std::string{*PLABELMODE};
+                if (labelMode == "index")
+                    label = std::to_string(visible + 1);
+                else if (labelMode == "token")
+                    label = visible < tokenMap.size() ? tokenMap[visible] : fallbackTokenForVisibleIndex(visible);
+                else
+                    label = std::to_string(image.workspaceID);
+
+                int      state = 0;
+                uint64_t color = showWorkspaceNumbers ? *PWORKSPACENUMCOL : *PLABELCOLDEFAULT;
+                if (!showWorkspaceNumbers && isFocus) {
+                    state = 2;
+                    color = *PLABELCOLFOCUS;
+                } else if (!showWorkspaceNumbers && isCurrent) {
+                    state = 3;
+                    color = *PLABELCOLCURRENT;
+                } else if (!showWorkspaceNumbers && isHover) {
+                    state = 1;
+                    color = *PLABELCOLHOVER;
+                }
+
+                drawLabel(image.labels[state], label, color, *PLABELPOS, *PLABELOFFX, *PLABELOFFY, tileBox);
+            }
+
+            if (selectionLabelsEnabled) {
+                const std::string token = visible < selectMap.size() ? selectMap[visible] : "";
+                drawLabel(image.selectionLabel, token, *PSELECTLABELCOL, *PSELECTLABELPOS, *PSELECTLABELOFFX, *PSELECTLABELOFFY, tileBox);
+            }
+
+            ++visible;
         }
     }
 

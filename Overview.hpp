@@ -40,6 +40,7 @@ class COverview {
     void          selectHoveredWorkspace();
     bool          selectWorkspaceByID(int64_t workspaceID);
     bool          selectVisibleIndex(size_t index);
+    bool          selectVisibleToken(const std::string& token);
     int64_t       selectedWorkspaceID() const;
     void          moveKeyboardFocus(int dx, int dy);
     void          confirmKeyboardFocus();
@@ -68,6 +69,7 @@ class COverview {
         };
 
         std::array<SLabelTexture, 4> labels;
+        SLabelTexture                selectionLabel;
     };
 
   private:
