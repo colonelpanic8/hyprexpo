@@ -6,9 +6,11 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/legacy/ConfigManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/shared/actions/ConfigActions.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
@@ -21,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <string_view>
 #include <lua.hpp>
 #include <xkbcommon/xkbcommon.h>
@@ -42,13 +45,25 @@ typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
 static bool g_unloading = false;
 
 // Do NOT change this function.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
+#endif
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
-static bool       renderingOverview = false;
+static bool            renderingOverview = false;
 
-const std::string KEYWORD_EXPO_GESTURE = "hyprexpo-gesture";
+const std::string      KEYWORD_EXPO_GESTURE = "hyprexpo-gesture";
+
+static SDispatchResult onKbFocusDispatcher(std::string arg);
+static SDispatchResult onKbConfirmDispatcher(std::string arg);
+static SDispatchResult onKbSelectIndexDispatcher(std::string arg);
+static SDispatchResult onKbSelectTokenDispatcher(std::string arg);
 
 //
 static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
@@ -266,6 +281,32 @@ static bool shouldSelectWorkspaceFromKey(const IKeyboard::SKeyEvent& event) {
     return changeToSingleDigitWorkspace(ARG).success;
 }
 
+static std::string trimCopy(std::string_view value) {
+    const auto first = value.find_first_not_of(" \t\n\r");
+    if (first == std::string_view::npos)
+        return "";
+
+    const auto last = value.find_last_not_of(" \t\n\r");
+    return std::string{value.substr(first, last - first + 1)};
+}
+
+static std::optional<size_t> tokenToVisibleIndex(const std::string& token) {
+    if (token.size() != 1)
+        return std::nullopt;
+
+    const char c = token[0];
+    if (c >= '1' && c <= '9')
+        return c - '1';
+    if (c == '0')
+        return 9;
+    if (c >= 'a' && c <= 'z')
+        return 10 + c - 'a';
+    if (c >= 'A' && c <= 'Z')
+        return 10 + c - 'A';
+
+    return std::nullopt;
+}
+
 static SDispatchResult onExpoDispatcher(std::string arg) {
 
     if (g_pOverview && g_pOverview->m_isSwiping)
@@ -340,6 +381,15 @@ static bool addConfigValue(SP<Config::Values::IValue> value) {
     }
 
     return true;
+}
+
+static void addLegacyConfigKeyword(const std::string& name, Hyprlang::PCONFIGHANDLERFUNC function, Hyprlang::SHandlerOptions options = {}) {
+    if (Config::mgr()->type() != Config::CONFIG_LEGACY) {
+        Log::logger->log(Log::WARN, "[hyprexpo] config keyword {} is only supported by the legacy config backend", name);
+        return;
+    }
+
+    static_cast<Config::Legacy::CConfigManager*>(Config::mgr().get())->addPluginKeyword(PHANDLE, name, function, options);
 }
 
 static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RHS) {
@@ -423,6 +473,10 @@ static Hyprlang::CParseResult expoGestureKeyword(const char* LHS, const char* RH
     return result;
 }
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
+#endif
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
@@ -487,12 +541,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
 
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:expo", ::onExpoDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_focus", ::onKbFocusDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_confirm", ::onKbConfirmDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_select", ::onKbSelectTokenDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_selecti", ::onKbSelectIndexDispatcher);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "expo", ::luaExpo);
 
-    HyprlandAPI::addConfigKeyword(PHANDLE, KEYWORD_EXPO_GESTURE, ::expoGestureKeyword, {true});
+    addLegacyConfigKeyword(KEYWORD_EXPO_GESTURE, ::expoGestureKeyword, {true});
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:columns", "columns", 3));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gap_size", "gap size", 5));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gap_size_outer", "outer gap size", 0));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:bg_col", "background color", 0xFF111111));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:workspace_method", "workspace method", "center current"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:skip_empty", "skip empty workspaces", 0));
@@ -501,9 +560,44 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:workspace_number_color", "workspace number color", 0xFFFFFFFF));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", 200));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:cancel_key", "cancel key", "escape"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:tile_rounding", "tile rounding", 0));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprexpo:tile_rounding_power", "tile rounding power", 2.F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:tile_rounding_hover", "hover tile rounding override", -1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:tile_rounding_focus", "focused tile rounding override", -1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:tile_rounding_current", "current tile rounding override", -1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:border_width", "highlight border width", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:border_color_current", "current tile border color", 0xFF66CCFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:border_color_hover", "hovered tile border color", 0xFFAABBCC));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:border_color_focus", "keyboard-focused tile border color", 0xFFFFCC66));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_enable", "show configurable labels", 0));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_text_mode", "label text mode", "token"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_token_map", "label token overrides", ""));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_position", "label position", "top-left"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_offset_x", "label x offset", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_offset_y", "label y offset", 6));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_show", "label visibility mode", "always"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_font_size", "label font size", 16));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_font_family", "label font family", "Sans"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_font_bold", "label font bold", 1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_font_italic", "label font italic", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_default", "default label color", 0xFFFFFFFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_hover", "hover label color", 0xFFEEEEEE));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_focus", "keyboard-focused label color", 0xFFFFCC66));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_color_current", "current label color", 0xFF66CCFF));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_bg_enable", "label background", 1));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:label_bg_color", "label background color", 0x88000000));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_bg_rounding", "label background rounding", 8));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_padding", "label background padding", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_pixel_snap", "snap label pixels", 1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_wrap_h", "keyboard navigation horizontal wrap", 1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_wrap_v", "keyboard navigation vertical wrap", 1));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_reading_order", "keyboard navigation reading order", 0));
 
     return {"hyprexpo", "A plugin for an overview", "Vaxry", "1.0"};
 }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewPassElement");
@@ -511,4 +605,67 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_unloading = true;
 
     Config::mgr()->reload(); // we need to reload now to clear all the gestures
+}
+
+static SDispatchResult onKbFocusDispatcher(std::string arg) {
+    if (!g_pOverview)
+        return {};
+
+    arg = trimCopy(arg);
+    if (arg == "left")
+        g_pOverview->moveKeyboardFocus(-1, 0);
+    else if (arg == "right")
+        g_pOverview->moveKeyboardFocus(1, 0);
+    else if (arg == "up")
+        g_pOverview->moveKeyboardFocus(0, -1);
+    else if (arg == "down")
+        g_pOverview->moveKeyboardFocus(0, 1);
+    else
+        return {.success = false, .error = "invalid arg. expected left, right, up, or down"};
+
+    return {};
+}
+
+static SDispatchResult onKbConfirmDispatcher(std::string) {
+    if (g_pOverview)
+        g_pOverview->confirmKeyboardFocus();
+
+    return {};
+}
+
+static SDispatchResult onKbSelectIndexDispatcher(std::string arg) {
+    if (!g_pOverview)
+        return {};
+
+    arg = trimCopy(arg);
+
+    size_t index = 0;
+    try {
+        index = std::stoull(arg);
+    } catch (...) { return {.success = false, .error = "invalid index"}; }
+
+    if (index == 0)
+        return {.success = false, .error = "index is 1-based"};
+
+    if (!g_pOverview->selectVisibleIndex(index - 1))
+        return {.success = false, .error = "no visible workspace for index"};
+
+    g_pOverview->close();
+    return {};
+}
+
+static SDispatchResult onKbSelectTokenDispatcher(std::string arg) {
+    if (!g_pOverview)
+        return {};
+
+    arg              = trimCopy(arg);
+    const auto index = tokenToVisibleIndex(arg);
+    if (!index)
+        return {.success = false, .error = "invalid token. expected 1-9, 0, or a-z"};
+
+    if (!g_pOverview->selectVisibleIndex(*index))
+        return {.success = false, .error = "no visible workspace for token"};
+
+    g_pOverview->close();
+    return {};
 }

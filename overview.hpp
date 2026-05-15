@@ -8,6 +8,9 @@
 #include <hyprland/src/render/Texture.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <array>
+#include <cstdint>
+#include <string>
 #include <vector>
 
 // saves on resources, but is a bit broken rn with blur.
@@ -36,7 +39,10 @@ class COverview {
     void          close(bool switchToSelection = true);
     void          selectHoveredWorkspace();
     bool          selectWorkspaceByID(int64_t workspaceID);
+    bool          selectVisibleIndex(size_t index);
     int64_t       selectedWorkspaceID() const;
+    void          moveKeyboardFocus(int dx, int dy);
+    void          confirmKeyboardFocus();
 
     bool          blockOverviewRendering = false;
     bool          blockDamageReporting   = false;
@@ -49,8 +55,19 @@ class COverview {
         int64_t                  workspaceID = -1;
         PHLWORKSPACE             pWorkspace;
         CBox                     box;
-        SP<Render::ITexture>     labelTex;
-        Vector2D                 labelSizePx;
+
+        struct SLabelTexture {
+            SP<Render::ITexture> tex;
+            Vector2D             sizePx;
+            std::string          text;
+            uint64_t             color      = 0;
+            int                  fontSizePx = 0;
+            std::string          fontFamily;
+            bool                 bold   = false;
+            bool                 italic = false;
+        };
+
+        std::array<SLabelTexture, 4> labels;
     };
 
   private:
@@ -58,6 +75,9 @@ class COverview {
     void                         redrawAll(bool forcelowres = false);
     void                         onWorkspaceChange();
     void                         fullRender();
+    void                         updateHoveredFromMouse();
+    bool                         isTileValid(int id) const;
+    void                         ensureKeyboardFocus();
 
     int                          SIDE_LENGTH = 3;
     int                          GAP_WIDTH   = 5;
@@ -69,6 +89,8 @@ class COverview {
 
     int                          openedID  = -1;
     int                          closeOnID = -1;
+    int                          hoveredID = -1;
+    int                          kbFocusID = -1;
 
     std::vector<SWorkspaceImage> images;
 
