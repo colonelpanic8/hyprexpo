@@ -67,5 +67,5 @@ void registerConfigValues() {
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_wrap_h", "keyboard navigation horizontal wrap", 1));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_wrap_v", "keyboard navigation vertical wrap", 1));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:keynav_reading_order", "keyboard navigation reading order", 0));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:live_preview_follow_focus", "switch active workspace when overview focus changes", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:live_preview_follow_focus", "switch active workspace when overview focus changes", 1));
 }
