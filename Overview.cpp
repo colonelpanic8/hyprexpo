@@ -122,6 +122,14 @@ struct SWorkspacePreviewState {
     Vector2D offsetGoal;
 };
 
+struct SWindowPreviewState {
+    PHLWINDOW window;
+    Vector2D  positionValue;
+    Vector2D  positionGoal;
+    Vector2D  sizeValue;
+    Vector2D  sizeGoal;
+};
+
 static SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace) {
     SWorkspacePreviewState state;
     if (!workspace)
@@ -154,6 +162,42 @@ static void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SW
     *workspace->m_alpha = state.alphaGoal;
     workspace->m_renderOffset->setValueAndWarp(state.offsetValue);
     *workspace->m_renderOffset = state.offsetGoal;
+}
+
+static std::vector<SWindowPreviewState> applyWorkspaceWindowPreviewState(const PHLWORKSPACE& workspace) {
+    std::vector<SWindowPreviewState> states;
+    if (!workspace)
+        return states;
+
+    for (const auto& window : g_pCompositor->m_windows) {
+        if (!windowVisibleOnWorkspace(window, workspace))
+            continue;
+
+        states.push_back({
+            .window        = window,
+            .positionValue = window->m_realPosition->value(),
+            .positionGoal  = window->m_realPosition->goal(),
+            .sizeValue     = window->m_realSize->value(),
+            .sizeGoal      = window->m_realSize->goal(),
+        });
+
+        window->m_realPosition->setValueAndWarp(window->m_realPosition->goal());
+        window->m_realSize->setValueAndWarp(window->m_realSize->goal());
+    }
+
+    return states;
+}
+
+static void restoreWorkspaceWindowPreviewState(const std::vector<SWindowPreviewState>& states) {
+    for (const auto& state : states) {
+        if (!state.window)
+            continue;
+
+        state.window->m_realPosition->setValueAndWarp(state.positionValue);
+        *state.window->m_realPosition = state.positionGoal;
+        state.window->m_realSize->setValueAndWarp(state.sizeValue);
+        *state.window->m_realSize = state.sizeGoal;
+    }
 }
 
 static void recalculateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
@@ -314,12 +358,14 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             PMONITOR->m_activeWorkspace = PWORKSPACE;
             const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
             recalculateWorkspaceForPreview(PMONITOR, PWORKSPACE);
+            const auto WINDOWPREVIEWSTATE = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowPreviewState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
 
             g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
 
+            restoreWorkspaceWindowPreviewState(WINDOWPREVIEWSTATE);
             restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
 
             if (PWORKSPACE == startedOn)
@@ -793,15 +839,17 @@ void COverview::redrawID(int id, bool forcelowres) {
     startedOn->m_visible = false;
 
     if (PWORKSPACE) {
-        pMonitor->m_activeWorkspace = PWORKSPACE;
-        const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
+        pMonitor->m_activeWorkspace    = PWORKSPACE;
+        const auto PREVIEWSTATE        = applyWorkspacePreviewState(PWORKSPACE);
         recalculateWorkspaceForPreview(pMonitor.lock(), PWORKSPACE);
+        const auto WINDOWPREVIEWSTATE = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowPreviewState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace = openSpecial;
 
         g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
 
+        restoreWorkspaceWindowPreviewState(WINDOWPREVIEWSTATE);
         restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
 
         if (PWORKSPACE == startedOn)
