@@ -92,6 +92,7 @@ label_pixel_snap | boolean | snap label boxes to integer pixels | `true`
 keynav_wrap_h | boolean | keyboard navigation wraps horizontally | `true`
 keynav_wrap_v | boolean | keyboard navigation wraps vertically | `true`
 keynav_reading_order | boolean | left/right navigation scans row-major order | `false`
+live_preview_follow_focus | boolean | switch the active workspace as overview focus moves | `false`
 
 ### Keywords
 
