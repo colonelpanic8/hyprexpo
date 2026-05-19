@@ -110,6 +110,7 @@ bool COverview::finishWindowDrag() {
     images[SOURCE].pWorkspace = SOURCEWS;
     g_pCompositor->moveWindowToWorkspaceSafe(WINDOW, TARGETWS);
     settleWorkspaceMoveAnimation(WINDOW);
+    switchActiveWorkspaceToTile(TARGET);
     redrawDraggedWindowTiles(SOURCE, TARGET);
     return true;
 }
@@ -164,8 +165,34 @@ bool COverview::moveWindowBetweenVisibleIndices(size_t sourceIndex, size_t targe
     images[SOURCE].pWorkspace = SOURCEWS;
     g_pCompositor->moveWindowToWorkspaceSafe(window, TARGETWS);
     settleWorkspaceMoveAnimation(window);
+    switchActiveWorkspaceToTile(TARGET);
     redrawDraggedWindowTiles(SOURCE, TARGET);
     return true;
+}
+
+void COverview::switchActiveWorkspaceToTile(int target) {
+    if (!isTileValid(target) || !pMonitor)
+        return;
+
+    const auto TARGETWS = ensureWorkspaceForTile(target);
+    if (!TARGETWS)
+        return;
+
+    openedID  = target;
+    closeOnID = target;
+    kbFocusID = target;
+    startedOn = TARGETWS;
+
+    pMonitor->setSpecialWorkspace(0);
+
+    if (pMonitor->m_activeWorkspace != TARGETWS)
+        Config::Actions::changeWorkspace(TARGETWS->getConfigName());
+
+    if (pMonitor->m_activeWorkspace)
+        startedOn = pMonitor->m_activeWorkspace;
+
+    damageDirty = true;
+    damage();
 }
 
 void COverview::redrawDraggedWindowTiles(int source, int target) {

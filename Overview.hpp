@@ -86,6 +86,7 @@ class COverview {
     void                         beginWindowDrag();
     bool                         finishWindowDrag();
     void                         updateWindowDrag();
+    void                         switchActiveWorkspaceToTile(int target);
     void                         redrawDraggedWindowTiles(int source, int target);
     void                         queueRedrawID(int id);
     void                         flushQueuedRedraws();
