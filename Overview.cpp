@@ -18,6 +18,7 @@
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/helpers/Format.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/animation/AnimationManager.hpp>
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
@@ -153,6 +154,19 @@ static void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SW
     *workspace->m_alpha = state.alphaGoal;
     workspace->m_renderOffset->setValueAndWarp(state.offsetValue);
     *workspace->m_renderOffset = state.offsetGoal;
+}
+
+static void recalculateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
+    if (!monitor || !workspace || !g_layoutManager)
+        return;
+
+    const auto STARTEDON = monitor->m_activeWorkspace;
+
+    // Fake framebuffer captures bypass Hyprland's normal monitor-render recalc,
+    // which only updates the monitor's active workspace.
+    monitor->m_activeWorkspace = workspace;
+    g_layoutManager->recalculateMonitor(monitor);
+    monitor->m_activeWorkspace = STARTEDON;
 }
 
 COverview::~COverview() {
@@ -299,6 +313,7 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             image.pWorkspace            = PWORKSPACE;
             PMONITOR->m_activeWorkspace = PWORKSPACE;
             const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
+            recalculateWorkspaceForPreview(PMONITOR, PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
@@ -780,6 +795,7 @@ void COverview::redrawID(int id, bool forcelowres) {
     if (PWORKSPACE) {
         pMonitor->m_activeWorkspace = PWORKSPACE;
         const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
+        recalculateWorkspaceForPreview(pMonitor.lock(), PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace = openSpecial;
