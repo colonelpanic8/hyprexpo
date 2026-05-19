@@ -167,8 +167,6 @@ namespace Internals {
 
         monitor->m_activeWorkspace = workspace;
 
-        if (g_layoutManager)
-            g_layoutManager->recalculateMonitor(monitor);
         recalculateWorkspaceLayout(workspace);
 
         return PREVIOUSWORKSPACE;
@@ -180,8 +178,6 @@ namespace Internals {
 
         monitor->m_activeWorkspace = workspace;
 
-        if (g_layoutManager)
-            g_layoutManager->recalculateMonitor(monitor);
         recalculateWorkspaceLayout(workspace);
     }
 
