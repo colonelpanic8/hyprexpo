@@ -13,10 +13,14 @@ set(SRC
     ExpoGesture.cpp
     GestureKeyword.cpp
     Hooks.cpp
+    Internals.cpp
+    Interaction.cpp
     LabelRenderer.cpp
     Overview.cpp
     OverviewPassElement.cpp
     Plugin.cpp
+    Render.cpp
+    Swipe.cpp
     WorkspaceLayout.cpp
 )
 
