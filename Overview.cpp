@@ -147,12 +147,14 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
             image.pWorkspace        = PWORKSPACE;
             const auto PREVIOUSWS    = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
             const auto PREVIEWSTATE  = applyWorkspacePreviewState(PWORKSPACE);
+            const auto WINDOWSTATE   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;
 
             g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
 
+            restoreWorkspaceWindowGoalState(WINDOWSTATE);
             restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
             restoreActiveWorkspaceAfterPreview(PMONITOR, PREVIOUSWS);
             startedOn->m_visible = false;

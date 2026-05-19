@@ -22,12 +22,14 @@
 #include <hyprland/src/config/shared/complex/ComplexDataTypes.hpp>
 #include <hyprland/src/helpers/Format.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
+#include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/managers/animation/AnimationManager.hpp>
 #include <hyprland/src/managers/animation/DesktopAnimationManager.hpp>
 #include <hyprland/src/managers/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/PointerManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopTimer.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #undef private
@@ -55,9 +57,20 @@ namespace Internals {
         Vector2D offsetGoal;
     };
 
-    SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
-    void                   restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
-    PHLWORKSPACE           activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
-    void                   restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
+    struct SWindowPreviewState {
+        PHLWINDOW window;
+        Vector2D  positionValue;
+        Vector2D  positionGoal;
+        Vector2D  sizeValue;
+        Vector2D  sizeGoal;
+    };
+
+    SWorkspacePreviewState           applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
+    void                             restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
+    std::vector<SWindowPreviewState> applyWorkspaceWindowGoalState(const PHLWORKSPACE& workspace);
+    void                             restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& states);
+    void                             recalculateWorkspaceLayout(const PHLWORKSPACE& workspace);
+    PHLWORKSPACE                     activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
+    void                             restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 
 }

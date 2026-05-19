@@ -114,32 +114,92 @@ bool COverview::finishWindowDrag() {
     return true;
 }
 
+int COverview::tileIDForVisibleIndex(size_t index) const {
+    size_t visible = 0;
+    for (size_t i = 0; i < images.size(); ++i) {
+        if (!isTileValid(i))
+            continue;
+
+        if (visible == index)
+            return i;
+
+        ++visible;
+    }
+
+    return -1;
+}
+
+bool COverview::moveWindowBetweenVisibleIndices(size_t sourceIndex, size_t targetIndex, const PHLWINDOW& requestedWindow) {
+    if (closing)
+        return false;
+
+    const int SOURCE = tileIDForVisibleIndex(sourceIndex);
+    const int TARGET = tileIDForVisibleIndex(targetIndex);
+    if (!isTileValid(SOURCE) || !isTileValid(TARGET) || SOURCE == TARGET)
+        return false;
+
+    const auto SOURCEWS = images[SOURCE].pWorkspace ? images[SOURCE].pWorkspace : g_pCompositor->getWorkspaceByID(images[SOURCE].workspaceID);
+    const auto TARGETWS = ensureWorkspaceForTile(TARGET);
+    if (!SOURCEWS || !TARGETWS || SOURCEWS == TARGETWS)
+        return false;
+
+    PHLWINDOW window = requestedWindow;
+    if (window) {
+        if (!windowVisibleOnWorkspace(window, SOURCEWS))
+            return false;
+    } else {
+        for (auto it = g_pCompositor->m_windows.rbegin(); it != g_pCompositor->m_windows.rend(); ++it) {
+            const auto& candidate = *it;
+            if (!windowVisibleOnWorkspace(candidate, SOURCEWS))
+                continue;
+
+            window = candidate;
+            break;
+        }
+    }
+
+    if (!window)
+        return false;
+
+    images[SOURCE].pWorkspace = SOURCEWS;
+    g_pCompositor->moveWindowToWorkspaceSafe(window, TARGETWS);
+    settleWorkspaceMoveAnimation(window);
+    redrawDraggedWindowTiles(SOURCE, TARGET);
+    return true;
+}
+
 void COverview::redrawDraggedWindowTiles(int source, int target) {
-    auto refresh = [source, target] {
-        if (!g_pOverview || g_pOverview->closing)
-            return;
+    queueRedrawID(source);
+    queueRedrawID(target);
 
-        g_pOverview->redrawID(source);
-        g_pOverview->redrawID(target);
-        g_pOverview->damage();
-    };
+    for (const auto id : queuedRedrawIDs) {
+        if (std::ranges::find(settlingRedrawIDs, id) == settlingRedrawIDs.end())
+            settlingRedrawIDs.push_back(id);
+    }
+    redrawSettleTicks = 4;
 
-    refresh();
+    flushQueuedRedraws();
 
-    auto count = std::make_shared<int>(0);
-    auto timer = makeShared<CEventLoopTimer>(
-        50ms,
-        [source, target, count](SP<CEventLoopTimer> self, void*) {
-            if (!g_pOverview || g_pOverview->closing) {
+    if (redrawSettleTimer)
+        return;
+
+    redrawSettleTimer = makeShared<CEventLoopTimer>(
+        75ms,
+        [this](SP<CEventLoopTimer> self, void*) {
+            if (!g_pOverview || g_pOverview.get() != this || closing) {
                 self->cancel();
+                redrawSettleTimer.reset();
                 return;
             }
 
-            g_pOverview->redrawID(source);
-            g_pOverview->redrawID(target);
-            g_pOverview->damage();
+            for (const auto id : settlingRedrawIDs)
+                queueRedrawID(id);
 
-            if (++*count >= 3) {
+            flushQueuedRedraws();
+
+            if (--redrawSettleTicks <= 0) {
+                settlingRedrawIDs.clear();
+                redrawSettleTimer.reset();
                 self->cancel();
                 return;
             }
@@ -147,7 +207,28 @@ void COverview::redrawDraggedWindowTiles(int source, int target) {
             self->updateTimeout(100ms);
         },
         nullptr);
-    g_pEventLoopManager->addTimer(timer);
+    g_pEventLoopManager->addTimer(redrawSettleTimer);
+}
+
+void COverview::queueRedrawID(int id) {
+    if (!isTileValid(id))
+        return;
+
+    if (std::ranges::find(queuedRedrawIDs, id) == queuedRedrawIDs.end())
+        queuedRedrawIDs.push_back(id);
+}
+
+void COverview::flushQueuedRedraws() {
+    if (queuedRedrawIDs.empty())
+        return;
+
+    const auto IDS = queuedRedrawIDs;
+    queuedRedrawIDs.clear();
+
+    for (const auto id : IDS)
+        redrawID(id);
+
+    damage();
 }
 
 void COverview::selectHoveredWorkspace() {

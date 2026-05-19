@@ -115,6 +115,47 @@ namespace Internals {
         *workspace->m_renderOffset = state.offsetGoal;
     }
 
+    std::vector<SWindowPreviewState> applyWorkspaceWindowGoalState(const PHLWORKSPACE& workspace) {
+        std::vector<SWindowPreviewState> states;
+        if (!workspace)
+            return states;
+
+        for (const auto& window : g_pCompositor->m_windows) {
+            if (!windowVisibleOnWorkspace(window, workspace))
+                continue;
+
+            states.push_back({
+                .window        = window,
+                .positionValue = window->m_realPosition->value(),
+                .positionGoal  = window->m_realPosition->goal(),
+                .sizeValue     = window->m_realSize->value(),
+                .sizeGoal      = window->m_realSize->goal(),
+            });
+
+            window->m_realPosition->setValueAndWarp(window->m_realPosition->goal());
+            window->m_realSize->setValueAndWarp(window->m_realSize->goal());
+        }
+
+        return states;
+    }
+
+    void restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& states) {
+        for (const auto& state : states) {
+            if (!state.window)
+                continue;
+
+            state.window->m_realPosition->setValueAndWarp(state.positionValue);
+            *state.window->m_realPosition = state.positionGoal;
+            state.window->m_realSize->setValueAndWarp(state.sizeValue);
+            *state.window->m_realSize = state.sizeGoal;
+        }
+    }
+
+    void recalculateWorkspaceLayout(const PHLWORKSPACE& workspace) {
+        if (workspace && workspace->m_space)
+            workspace->m_space->recalculate(Layout::RECALCULATE_REASON_WORKSPACE_CHANGE);
+    }
+
     PHLWORKSPACE activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
         if (!monitor)
             return nullptr;
@@ -129,6 +170,7 @@ namespace Internals {
 
         if (g_layoutManager)
             g_layoutManager->recalculateMonitor(monitor);
+        recalculateWorkspaceLayout(workspace);
 
         return PREVIOUSWORKSPACE;
     }
@@ -142,6 +184,7 @@ namespace Internals {
 
         if (g_layoutManager)
             g_layoutManager->recalculateMonitor(monitor);
+        recalculateWorkspaceLayout(workspace);
     }
 
 }

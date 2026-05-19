@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+class CEventLoopTimer;
+
 // saves on resources, but is a bit broken rn with blur.
 // hyprland's fault, but cba to fix.
 constexpr bool ENABLE_LOWRES = false;
@@ -42,6 +44,7 @@ class COverview {
     bool          selectVisibleIndex(size_t index);
     bool          selectVisibleToken(const std::string& token);
     int64_t       selectedWorkspaceID() const;
+    bool          moveWindowBetweenVisibleIndices(size_t sourceIndex, size_t targetIndex, const PHLWINDOW& window = nullptr);
     void          moveKeyboardFocus(int dx, int dy);
     void          confirmKeyboardFocus();
 
@@ -84,6 +87,9 @@ class COverview {
     bool                         finishWindowDrag();
     void                         updateWindowDrag();
     void                         redrawDraggedWindowTiles(int source, int target);
+    void                         queueRedrawID(int id);
+    void                         flushQueuedRedraws();
+    int                          tileIDForVisibleIndex(size_t index) const;
     PHLWINDOW                    windowAtTilePoint(int id, const Vector2D& localPoint) const;
     Vector2D                     tilePointToWorkspacePoint(int id, const Vector2D& localPoint) const;
     PHLWORKSPACE                 ensureWorkspaceForTile(int id);
@@ -106,6 +112,11 @@ class COverview {
     bool                         dragMoved      = false;
     Vector2D                     dragGrabOffset = Vector2D{};
     PHLWINDOW                    dragWindow;
+
+    std::vector<int>             queuedRedrawIDs;
+    std::vector<int>             settlingRedrawIDs;
+    int                          redrawSettleTicks = 0;
+    SP<CEventLoopTimer>          redrawSettleTimer;
 
     std::vector<SWorkspaceImage> images;
 

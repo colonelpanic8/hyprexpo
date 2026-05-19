@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cctype>
 #include <lua.hpp>
+#include <sstream>
 #include <string_view>
 #include <xkbcommon/xkbcommon.h>
 
@@ -326,11 +327,44 @@ static SDispatchResult onKbSelectTokenDispatcher(std::string arg) {
     return {};
 }
 
+static SDispatchResult onMovePreviewWindowDispatcher(std::string arg) {
+    if (!g_pOverview)
+        return {.success = false, .error = "overview is not open"};
+
+    std::istringstream stream{trimCopy(arg)};
+    size_t             source = 0;
+    size_t             target = 0;
+    if (!(stream >> source >> target))
+        return {.success = false, .error = "expected 1-based source and target visible tile indices, optionally followed by a window address"};
+
+    if (source == 0 || target == 0)
+        return {.success = false, .error = "indices are 1-based"};
+
+    std::string windowAddress;
+    stream >> windowAddress;
+
+    PHLWINDOW window;
+    if (!windowAddress.empty()) {
+        if (!windowAddress.starts_with("address:"))
+            windowAddress = "address:" + windowAddress;
+
+        window = g_pCompositor->getWindowByRegex(windowAddress);
+        if (!window)
+            return {.success = false, .error = "window address did not match a mapped window"};
+    }
+
+    if (!g_pOverview->moveWindowBetweenVisibleIndices(source - 1, target - 1, window))
+        return {.success = false, .error = "failed to move preview window"};
+
+    return {};
+}
+
 void registerDispatchers() {
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:expo", ::onExpoDispatcher);
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_focus", ::onKbFocusDispatcher);
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_confirm", ::onKbConfirmDispatcher);
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_select", ::onKbSelectTokenDispatcher);
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:kb_selecti", ::onKbSelectIndexDispatcher);
+    HyprlandAPI::addDispatcherV2(PHANDLE, "hyprexpo:move_window", ::onMovePreviewWindowDispatcher);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprexpo", "expo", ::luaExpo);
 }
