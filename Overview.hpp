@@ -80,6 +80,13 @@ class COverview {
     void                         updateHoveredFromMouse();
     bool                         isTileValid(int id) const;
     void                         ensureKeyboardFocus();
+    void                         beginWindowDrag();
+    bool                         finishWindowDrag();
+    void                         updateWindowDrag();
+    void                         redrawDraggedWindowTiles(int source, int target);
+    PHLWINDOW                    windowAtTilePoint(int id, const Vector2D& localPoint) const;
+    Vector2D                     tilePointToWorkspacePoint(int id, const Vector2D& localPoint) const;
+    PHLWORKSPACE                 ensureWorkspaceForTile(int id);
 
     int                          SIDE_LENGTH = 3;
     int                          GAP_WIDTH   = 5;
@@ -93,6 +100,12 @@ class COverview {
     int                          closeOnID = -1;
     int                          hoveredID = -1;
     int                          kbFocusID = -1;
+
+    Vector2D                     dragStartLocal = Vector2D{};
+    int                          dragSourceID   = -1;
+    bool                         dragMoved      = false;
+    Vector2D                     dragGrabOffset = Vector2D{};
+    PHLWINDOW                    dragWindow;
 
     std::vector<SWorkspaceImage> images;
 
