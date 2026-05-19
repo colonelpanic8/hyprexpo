@@ -258,6 +258,13 @@ void COverview::flushQueuedRedraws() {
     damage();
 }
 
+void COverview::followFocusToTile(int target) {
+    static const CConfigValue<Config::INTEGER> PFOLLOWFOCUS("plugin:hyprexpo:live_preview_follow_focus");
+
+    if (*PFOLLOWFOCUS && isTileValid(target) && openedID != target)
+        switchActiveWorkspaceToTile(target);
+}
+
 void COverview::selectHoveredWorkspace() {
     if (closing)
         return;
@@ -342,7 +349,12 @@ void COverview::updateHoveredFromMouse() {
     if (newHoveredID == hoveredID)
         return;
 
-    hoveredID = newHoveredID;
+    const int oldHoveredID = hoveredID;
+    hoveredID             = newHoveredID;
+
+    if (oldHoveredID != -1)
+        followFocusToTile(hoveredID);
+
     damage();
 }
 
@@ -394,6 +406,7 @@ void COverview::moveKeyboardFocus(int dx, int dy) {
 
             if (isTileValid(id)) {
                 kbFocusID = id;
+                followFocusToTile(kbFocusID);
                 damage();
                 return;
             }
@@ -415,6 +428,7 @@ void COverview::moveKeyboardFocus(int dx, int dy) {
             const int id = nx + y * SIDE_LENGTH;
             if (isTileValid(id)) {
                 kbFocusID = id;
+                followFocusToTile(kbFocusID);
                 damage();
                 return;
             }
@@ -436,6 +450,7 @@ void COverview::moveKeyboardFocus(int dx, int dy) {
             const int id = x + ny * SIDE_LENGTH;
             if (isTileValid(id)) {
                 kbFocusID = id;
+                followFocusToTile(kbFocusID);
                 damage();
                 return;
             }

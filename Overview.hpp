@@ -81,6 +81,7 @@ class COverview {
     void                         onWorkspaceChange();
     void                         fullRender();
     void                         updateHoveredFromMouse();
+    void                         followFocusToTile(int target);
     bool                         isTileValid(int id) const;
     void                         ensureKeyboardFocus();
     void                         beginWindowDrag();
