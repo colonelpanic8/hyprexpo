@@ -165,8 +165,7 @@ namespace Internals {
         if (!workspace)
             return PREVIOUSWORKSPACE;
 
-        if (PREVIOUSWORKSPACE != workspace)
-            monitor->changeWorkspace(workspace, true, true, true);
+        monitor->m_activeWorkspace = workspace;
 
         if (g_layoutManager)
             g_layoutManager->recalculateMonitor(monitor);
@@ -179,8 +178,7 @@ namespace Internals {
         if (!monitor || !workspace)
             return;
 
-        if (monitor->m_activeWorkspace != workspace)
-            monitor->changeWorkspace(workspace, true, true, true);
+        monitor->m_activeWorkspace = workspace;
 
         if (g_layoutManager)
             g_layoutManager->recalculateMonitor(monitor);
