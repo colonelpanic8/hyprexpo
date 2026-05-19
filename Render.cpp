@@ -48,18 +48,16 @@ void COverview::redrawID(int id, bool forcelowres) {
     startedOn->m_visible = false;
 
     if (PWORKSPACE) {
-        pMonitor->m_activeWorkspace = PWORKSPACE;
-        const auto PREVIEWSTATE     = applyWorkspacePreviewState(PWORKSPACE);
-        recalculateWorkspaceForPreview(pMonitor.lock(), PWORKSPACE);
-        const auto WINDOWPREVIEWSTATE = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowPreviewState(PWORKSPACE);
+        const auto PREVIOUSWS    = activateWorkspaceForPreview(pMonitor.lock(), PWORKSPACE);
+        const auto PREVIEWSTATE  = applyWorkspacePreviewState(PWORKSPACE);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace = openSpecial;
 
         g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
 
-        restoreWorkspaceWindowPreviewState(WINDOWPREVIEWSTATE);
         restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
+        restoreActiveWorkspaceAfterPreview(pMonitor.lock(), PREVIOUSWS);
 
         if (PWORKSPACE == startedOn)
             pMonitor->m_activeSpecialWorkspace.reset();

@@ -55,18 +55,9 @@ namespace Internals {
         Vector2D offsetGoal;
     };
 
-    struct SWindowPreviewState {
-        PHLWINDOW window;
-        Vector2D  positionValue;
-        Vector2D  positionGoal;
-        Vector2D  sizeValue;
-        Vector2D  sizeGoal;
-    };
-
-    SWorkspacePreviewState           applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
-    void                             restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
-    std::vector<SWindowPreviewState> applyWorkspaceWindowPreviewState(const PHLWORKSPACE& workspace);
-    void                             restoreWorkspaceWindowPreviewState(const std::vector<SWindowPreviewState>& states);
-    void                             recalculateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
+    SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
+    void                   restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
+    PHLWORKSPACE           activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
+    void                   restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace);
 
 }

@@ -115,53 +115,33 @@ namespace Internals {
         *workspace->m_renderOffset = state.offsetGoal;
     }
 
-    std::vector<SWindowPreviewState> applyWorkspaceWindowPreviewState(const PHLWORKSPACE& workspace) {
-        std::vector<SWindowPreviewState> states;
+    PHLWORKSPACE activateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
+        if (!monitor)
+            return nullptr;
+
+        const auto PREVIOUSWORKSPACE = monitor->m_activeWorkspace;
+
         if (!workspace)
-            return states;
+            return PREVIOUSWORKSPACE;
 
-        for (const auto& window : g_pCompositor->m_windows) {
-            if (!windowVisibleOnWorkspace(window, workspace))
-                continue;
+        if (PREVIOUSWORKSPACE != workspace)
+            monitor->changeWorkspace(workspace, true, true, true);
 
-            states.push_back({
-                .window        = window,
-                .positionValue = window->m_realPosition->value(),
-                .positionGoal  = window->m_realPosition->goal(),
-                .sizeValue     = window->m_realSize->value(),
-                .sizeGoal      = window->m_realSize->goal(),
-            });
+        if (g_layoutManager)
+            g_layoutManager->recalculateMonitor(monitor);
 
-            window->m_realPosition->setValueAndWarp(window->m_realPosition->goal());
-            window->m_realSize->setValueAndWarp(window->m_realSize->goal());
-        }
-
-        return states;
+        return PREVIOUSWORKSPACE;
     }
 
-    void restoreWorkspaceWindowPreviewState(const std::vector<SWindowPreviewState>& states) {
-        for (const auto& state : states) {
-            if (!state.window)
-                continue;
-
-            state.window->m_realPosition->setValueAndWarp(state.positionValue);
-            *state.window->m_realPosition = state.positionGoal;
-            state.window->m_realSize->setValueAndWarp(state.sizeValue);
-            *state.window->m_realSize = state.sizeGoal;
-        }
-    }
-
-    void recalculateWorkspaceForPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
-        if (!monitor || !workspace || !g_layoutManager)
+    void restoreActiveWorkspaceAfterPreview(PHLMONITOR monitor, const PHLWORKSPACE& workspace) {
+        if (!monitor || !workspace)
             return;
 
-        const auto STARTEDON = monitor->m_activeWorkspace;
+        if (monitor->m_activeWorkspace != workspace)
+            monitor->changeWorkspace(workspace, true, true, true);
 
-        // Fake framebuffer captures bypass Hyprland's normal monitor-render recalc,
-        // which only updates the monitor's active workspace.
-        monitor->m_activeWorkspace = workspace;
-        g_layoutManager->recalculateMonitor(monitor);
-        monitor->m_activeWorkspace = STARTEDON;
+        if (g_layoutManager)
+            g_layoutManager->recalculateMonitor(monitor);
     }
 
 }
