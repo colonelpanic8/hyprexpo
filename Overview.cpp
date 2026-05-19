@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <memory>
 #include <optional>
+#include <string>
 #define private   public
 #define protected public
 #include <hyprland/src/render/Renderer.hpp>
@@ -29,6 +31,7 @@
 #include "OverviewPassElement.hpp"
 
 using namespace Hyprutils::String;
+using namespace std::chrono_literals;
 
 static std::string lowerCopy(std::string value) {
     std::ranges::transform(value, value.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -77,6 +80,22 @@ static Config::CGradientValueData gradientFromColor(uint64_t color) {
     Config::CGradientValueData grad{CHyprColor(color)};
     grad.updateColorsOk();
     return grad;
+}
+
+static bool windowVisibleOnWorkspace(const PHLWINDOW& window, const PHLWORKSPACE& workspace) {
+    return window && workspace && window->m_workspace == workspace && window->m_isMapped && !window->isHidden() && !window->m_pinned;
+}
+
+static void settleWorkspaceMoveAnimation(const PHLWINDOW& window) {
+    if (!window)
+        return;
+
+    window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_TO_WORKSPACE)->resetAllCallbacks();
+    window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_TO_WORKSPACE)->setValueAndWarp(1.F);
+    *window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_TO_WORKSPACE) = 1.F;
+    window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
+    *window->alpha(Desktop::View::WINDOW_ALPHA_MOVE_FROM_WORKSPACE) = 1.F;
+    window->m_monitorMovedFrom = -1;
 }
 
 static void ensureFramebuffer(COverview::SWorkspaceImage& image, const CBox& monbox, uint32_t drmFormat) {
@@ -337,9 +356,29 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         info.cancelled    = true;
         lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
         updateHoveredFromMouse();
+        updateWindowDrag();
     };
 
-    auto onCursorSelect = [this](Event::SCallbackInfo& info) {
+    auto onCursorSelect = [this](IPointer::SButtonEvent event, Event::SCallbackInfo& info) {
+        if (closing)
+            return;
+
+        info.cancelled = true;
+
+        if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+            beginWindowDrag();
+            return;
+        }
+
+        if (finishWindowDrag())
+            return;
+
+        selectHoveredWorkspace();
+
+        close();
+    };
+
+    auto onTouchSelect = [this](Event::SCallbackInfo& info) {
         if (closing)
             return;
 
@@ -353,8 +392,151 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen([onCursorMove](Vector2D, Event::SCallbackInfo& info) { onCursorMove(info); });
     touchMoveHook = Event::bus()->m_events.input.touch.motion.listen([onCursorMove](ITouch::SMotionEvent, Event::SCallbackInfo& info) { onCursorMove(info); });
 
-    mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([onCursorSelect](IPointer::SButtonEvent, Event::SCallbackInfo& info) { onCursorSelect(info); });
-    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([onCursorSelect](ITouch::SDownEvent, Event::SCallbackInfo& info) { onCursorSelect(info); });
+    mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([onCursorSelect](IPointer::SButtonEvent event, Event::SCallbackInfo& info) { onCursorSelect(event, info); });
+    touchDownHook   = Event::bus()->m_events.input.touch.down.listen([onTouchSelect](ITouch::SDownEvent, Event::SCallbackInfo& info) { onTouchSelect(info); });
+}
+
+Vector2D COverview::tilePointToWorkspacePoint(int id, const Vector2D& localPoint) const {
+    const Vector2D tileSize = pMonitor->m_size / SIDE_LENGTH;
+    const Vector2D tilePos  = tileSize * Vector2D{id % SIDE_LENGTH, id / SIDE_LENGTH};
+    const Vector2D inTile   = localPoint - tilePos;
+
+    return pMonitor->m_position + Vector2D{std::clamp(inTile.x / tileSize.x, 0.0, 1.0) * pMonitor->m_size.x, std::clamp(inTile.y / tileSize.y, 0.0, 1.0) * pMonitor->m_size.y};
+}
+
+PHLWINDOW COverview::windowAtTilePoint(int id, const Vector2D& localPoint) const {
+    if (!isTileValid(id))
+        return nullptr;
+
+    const auto WORKSPACE = images[id].pWorkspace ? images[id].pWorkspace : g_pCompositor->getWorkspaceByID(images[id].workspaceID);
+    if (!WORKSPACE)
+        return nullptr;
+
+    const auto POINT = tilePointToWorkspacePoint(id, localPoint);
+    for (auto it = g_pCompositor->m_windows.rbegin(); it != g_pCompositor->m_windows.rend(); ++it) {
+        const auto& window = *it;
+        if (!windowVisibleOnWorkspace(window, WORKSPACE))
+            continue;
+
+        if (window->getWindowMainSurfaceBox().containsPoint(POINT))
+            return window;
+    }
+
+    return nullptr;
+}
+
+void COverview::beginWindowDrag() {
+    updateHoveredFromMouse();
+    dragStartLocal = lastMousePosLocal;
+    dragSourceID   = hoveredID;
+    dragMoved      = false;
+    dragWindow     = windowAtTilePoint(dragSourceID, dragStartLocal);
+    dragGrabOffset = Vector2D{};
+
+    if (dragWindow) {
+        const auto POINT = tilePointToWorkspacePoint(dragSourceID, dragStartLocal);
+        const auto BOX   = dragWindow->getWindowMainSurfaceBox();
+        dragGrabOffset   = POINT - Vector2D{BOX.x, BOX.y};
+        Cursor::overrideController->setOverride("grabbing", Cursor::CURSOR_OVERRIDE_UNKNOWN);
+        damage();
+    }
+}
+
+void COverview::updateWindowDrag() {
+    if (!dragWindow || dragMoved)
+        return;
+
+    const auto DX = lastMousePosLocal.x - dragStartLocal.x;
+    const auto DY = lastMousePosLocal.y - dragStartLocal.y;
+    if (std::hypot(DX, DY) < 12.0)
+        return;
+
+    dragMoved = true;
+    damage();
+}
+
+PHLWORKSPACE COverview::ensureWorkspaceForTile(int id) {
+    if (!isTileValid(id))
+        return nullptr;
+
+    auto& image = images[id];
+    if (image.pWorkspace)
+        return image.pWorkspace;
+
+    auto workspace = g_pCompositor->getWorkspaceByID(image.workspaceID);
+    if (!workspace)
+        workspace = g_pCompositor->createNewWorkspace(image.workspaceID, pMonitor->m_id, std::to_string(image.workspaceID), false);
+
+    image.pWorkspace = workspace;
+    return workspace;
+}
+
+bool COverview::finishWindowDrag() {
+    const auto WINDOW = dragWindow;
+    const int  SOURCE = dragSourceID;
+    const bool MOVED  = dragMoved;
+
+    dragWindow = nullptr;
+    dragSourceID = -1;
+    dragMoved    = false;
+    dragGrabOffset = Vector2D{};
+    Cursor::overrideController->setOverride("left_ptr", Cursor::CURSOR_OVERRIDE_UNKNOWN);
+
+    if (!WINDOW)
+        return false;
+
+    if (!MOVED)
+        return false;
+
+    updateHoveredFromMouse();
+
+    const int TARGET = hoveredID;
+    if (!isTileValid(SOURCE) || !isTileValid(TARGET) || SOURCE == TARGET)
+        return true;
+
+    const auto SOURCEWS = images[SOURCE].pWorkspace ? images[SOURCE].pWorkspace : g_pCompositor->getWorkspaceByID(images[SOURCE].workspaceID);
+    const auto TARGETWS = ensureWorkspaceForTile(TARGET);
+    if (!windowVisibleOnWorkspace(WINDOW, SOURCEWS) || !TARGETWS || TARGETWS == SOURCEWS)
+        return true;
+
+    images[SOURCE].pWorkspace = SOURCEWS;
+    g_pCompositor->moveWindowToWorkspaceSafe(WINDOW, TARGETWS);
+    settleWorkspaceMoveAnimation(WINDOW);
+    redrawDraggedWindowTiles(SOURCE, TARGET);
+    return true;
+}
+
+void COverview::redrawDraggedWindowTiles(int source, int target) {
+    auto refresh = [source, target] {
+        if (!g_pOverview || g_pOverview->closing)
+            return;
+
+        g_pOverview->redrawID(source);
+        g_pOverview->redrawID(target);
+        g_pOverview->damage();
+    };
+
+    refresh();
+
+    auto count = std::make_shared<int>(0);
+    auto timer = makeShared<CEventLoopTimer>(50ms, [source, target, count](SP<CEventLoopTimer> self, void*) {
+        if (!g_pOverview || g_pOverview->closing) {
+            self->cancel();
+            return;
+        }
+
+        g_pOverview->redrawID(source);
+        g_pOverview->redrawID(target);
+        g_pOverview->damage();
+
+        if (++*count >= 3) {
+            self->cancel();
+            return;
+        }
+
+        self->updateTimeout(100ms);
+    }, nullptr);
+    g_pEventLoopManager->addTimer(timer);
 }
 
 void COverview::selectHoveredWorkspace() {
@@ -586,7 +768,8 @@ void COverview::redrawID(int id, bool forcelowres) {
 
     clearWithColor(CHyprColor{0, 0, 0, 1.0});
 
-    const auto   PWORKSPACE = image.pWorkspace;
+    const auto   PWORKSPACE = image.pWorkspace ? image.pWorkspace : g_pCompositor->getWorkspaceByID(image.workspaceID);
+    image.pWorkspace        = PWORKSPACE;
 
     PHLWORKSPACE openSpecial = pMonitor->m_activeSpecialWorkspace;
     if (openSpecial)
@@ -954,6 +1137,32 @@ void COverview::fullRender() {
         drawBorder(openedID, *PBORDERCURRENT);
     if (kbFocusID != -1)
         drawBorder(kbFocusID, *PBORDERFOCUS);
+    if (dragMoved && dragSourceID != -1)
+        drawBorder(dragSourceID, *PBORDERFOCUS);
+
+    if (dragWindow && isTileValid(dragSourceID)) {
+        const auto WINDOWBOX = dragWindow->getWindowMainSurfaceBox();
+        if (WINDOWBOX.w > 0 && WINDOWBOX.h > 0) {
+            const CBox&  sourceBox = tileBoxes[dragSourceID];
+            const double scaleX    = sourceBox.w / pMonitor->m_size.x;
+            const double scaleY    = sourceBox.h / pMonitor->m_size.y;
+            const int    round     = tileRoundFor(dragSourceID, sourceBox);
+            const double minW      = std::min(sourceBox.w, 24.0 * pMonitor->m_scale);
+            const double minH      = std::min(sourceBox.h, 24.0 * pMonitor->m_scale);
+
+            CBox proxy = {
+                lastMousePosLocal.x * pMonitor->m_scale - dragGrabOffset.x * scaleX,
+                lastMousePosLocal.y * pMonitor->m_scale - dragGrabOffset.y * scaleY,
+                std::clamp(WINDOWBOX.w * scaleX, minW, sourceBox.w),
+                std::clamp(WINDOWBOX.h * scaleY, minH, sourceBox.h),
+            };
+            proxy.round();
+
+            Render::GL::g_pHyprOpenGL->renderRect(proxy, CHyprColor{0.93F, 0.70F, 0.26F, dragMoved ? 0.24F : 0.14F}, {.round = round, .roundingPower = roundingPower});
+            Render::GL::g_pHyprOpenGL->renderBorder(proxy, gradientFromColor(*PBORDERFOCUS),
+                                                    {.round = round, .roundingPower = roundingPower, .borderSize = std::max(2, (int)*PBORDERWIDTH + 1)});
+        }
+    }
 }
 
 static float lerp(const float& from, const float& to, const float perc) {
