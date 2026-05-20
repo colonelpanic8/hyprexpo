@@ -38,6 +38,16 @@ void registerConfigValues() {
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:border_color_current", "current tile border color", 0xFF66CCFF));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:border_color_hover", "hovered tile border color", 0xFFAABBCC));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:border_color_focus", "keyboard-focused tile border color", 0xFFFFCC66));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_enable", "show window icons", 0));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:window_icon_position", "window icon position", "bottom-right"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_size", "window icon size", 32));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_offset_x", "window icon x offset", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_offset_y", "window icon y offset", 6));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprexpo:window_icon_alpha", "window icon alpha", 1.F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_bg_enable", "window icon background", 1));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:window_icon_bg_color", "window icon background color", 0x88000000));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_bg_rounding", "window icon background rounding", 8));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:window_icon_padding", "window icon background padding", 4));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:label_enable", "show configurable labels", 0));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_text_mode", "label text mode", "token"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:label_token_map", "label token overrides", ""));

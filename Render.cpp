@@ -1,8 +1,345 @@
 #include "Internals.hpp"
 #include "OverviewPassElement.hpp"
 
+#include <hyprgraphics/image/Image.hpp>
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
+
 using namespace Hyprutils::String;
 using namespace Internals;
+
+namespace {
+
+    struct SWindowIconTexture {
+        SP<Render::ITexture> tex;
+        Vector2D             sizePx;
+        bool                 missing = false;
+    };
+
+    std::string trimCopy(std::string value) {
+        const auto FIRST = value.find_first_not_of(" \t\r\n");
+        if (FIRST == std::string::npos)
+            return "";
+
+        const auto LAST = value.find_last_not_of(" \t\r\n");
+        return value.substr(FIRST, LAST - FIRST + 1);
+    }
+
+    std::vector<std::string> splitColonList(const char* value) {
+        std::vector<std::string> result;
+        if (!value || !*value)
+            return result;
+
+        std::string input = value;
+        size_t      start = 0;
+        while (start <= input.size()) {
+            const size_t end  = input.find(':', start);
+            auto         item = trimCopy(input.substr(start, end == std::string::npos ? std::string::npos : end - start));
+            if (!item.empty())
+                result.push_back(item);
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+
+        return result;
+    }
+
+    std::vector<std::filesystem::path> xdgDataDirs() {
+        std::vector<std::filesystem::path> dirs;
+
+        if (const auto HOME = std::getenv("HOME")) {
+            if (const auto DATAHOME = std::getenv("XDG_DATA_HOME"); DATAHOME && *DATAHOME)
+                dirs.emplace_back(DATAHOME);
+            else
+                dirs.emplace_back(std::filesystem::path(HOME) / ".local/share");
+        }
+
+        auto systemDirs = splitColonList(std::getenv("XDG_DATA_DIRS"));
+        if (systemDirs.empty())
+            systemDirs = {"/usr/local/share", "/usr/share"};
+
+        for (const auto& dir : systemDirs)
+            dirs.emplace_back(dir);
+
+        std::vector<std::filesystem::path> unique;
+        std::unordered_set<std::string>    seen;
+        for (const auto& dir : dirs) {
+            const auto key = dir.lexically_normal().string();
+            if (!seen.insert(key).second)
+                continue;
+            unique.push_back(dir);
+        }
+
+        return unique;
+    }
+
+    std::optional<std::string> desktopField(const std::filesystem::path& path, const std::string& field) {
+        std::ifstream file(path);
+        if (!file)
+            return std::nullopt;
+
+        bool        inDesktopEntry = false;
+        std::string line;
+        while (std::getline(file, line)) {
+            line = trimCopy(line);
+            if (line.empty() || line[0] == '#' || line[0] == ';')
+                continue;
+
+            if (line.front() == '[' && line.back() == ']') {
+                inDesktopEntry = line == "[Desktop Entry]";
+                continue;
+            }
+
+            if (!inDesktopEntry)
+                continue;
+
+            const auto EQ = line.find('=');
+            if (EQ == std::string::npos)
+                continue;
+
+            if (line.substr(0, EQ) == field)
+                return trimCopy(line.substr(EQ + 1));
+        }
+
+        return std::nullopt;
+    }
+
+    std::optional<std::string> iconNameFromDesktopFile(const std::filesystem::path& path) {
+        if (const auto ICON = desktopField(path, "Icon"); ICON && !ICON->empty())
+            return ICON;
+
+        return std::nullopt;
+    }
+
+    std::optional<std::string> iconNameForClass(const std::string& windowClass) {
+        static std::unordered_map<std::string, std::optional<std::string>> cache;
+
+        const auto                                                         CLASSLOWER = lowerCopy(windowClass);
+        if (CLASSLOWER.empty())
+            return std::nullopt;
+
+        if (const auto IT = cache.find(CLASSLOWER); IT != cache.end())
+            return IT->second;
+
+        const std::vector<std::string> candidateNames = {
+            windowClass + ".desktop",
+            CLASSLOWER + ".desktop",
+        };
+
+        for (const auto& dataDir : xdgDataDirs()) {
+            const auto appDir = dataDir / "applications";
+            for (const auto& name : candidateNames) {
+                const auto path = appDir / name;
+                if (std::filesystem::exists(path)) {
+                    cache[CLASSLOWER] = iconNameFromDesktopFile(path);
+                    if (cache[CLASSLOWER])
+                        return cache[CLASSLOWER];
+                }
+            }
+        }
+
+        for (const auto& dataDir : xdgDataDirs()) {
+            const auto appDir = dataDir / "applications";
+            if (!std::filesystem::exists(appDir))
+                continue;
+
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(appDir, std::filesystem::directory_options::skip_permission_denied, ec)) {
+                if (ec)
+                    break;
+                if (!entry.is_regular_file(ec) || entry.path().extension() != ".desktop")
+                    continue;
+
+                const auto basename = lowerCopy(entry.path().stem().string());
+                if (basename == CLASSLOWER || basename.ends_with("." + CLASSLOWER)) {
+                    cache[CLASSLOWER] = iconNameFromDesktopFile(entry.path());
+                    if (cache[CLASSLOWER])
+                        return cache[CLASSLOWER];
+                }
+
+                const auto STARTUPWMCLASS = desktopField(entry.path(), "StartupWMClass");
+                if (STARTUPWMCLASS && lowerCopy(*STARTUPWMCLASS) == CLASSLOWER) {
+                    cache[CLASSLOWER] = iconNameFromDesktopFile(entry.path());
+                    if (cache[CLASSLOWER])
+                        return cache[CLASSLOWER];
+                }
+            }
+        }
+
+        cache[CLASSLOWER] = std::nullopt;
+        return std::nullopt;
+    }
+
+    bool supportedIconExtension(const std::filesystem::path& path) {
+        const auto EXT = lowerCopy(path.extension().string());
+        return EXT == ".png" || EXT == ".svg" || EXT == ".webp" || EXT == ".jpg" || EXT == ".jpeg" || EXT == ".bmp" || EXT == ".jxl" || EXT == ".avif";
+    }
+
+    int iconPathScore(const std::filesystem::path& path, int targetSize) {
+        int        score = 0;
+
+        const auto EXT = lowerCopy(path.extension().string());
+        if (EXT == ".svg")
+            score += 10000;
+        else if (EXT == ".png")
+            score += 8000;
+        else
+            score += 6000;
+
+        for (const auto& part : path) {
+            const auto name = lowerCopy(part.string());
+            if (name == "apps")
+                score += 1000;
+            if (name == "scalable" || name == "symbolic")
+                score += 700;
+
+            const auto X = name.find('x');
+            if (X != std::string::npos) {
+                try {
+                    const int side = std::stoi(name.substr(0, X));
+                    score += std::max(0, 512 - std::abs(side - targetSize));
+                } catch (...) { ; }
+            }
+        }
+
+        return score;
+    }
+
+    std::optional<std::filesystem::path> resolveIconPath(const std::string& iconName, int targetSize) {
+        static std::unordered_map<std::string, std::optional<std::filesystem::path>> cache;
+
+        if (iconName.empty())
+            return std::nullopt;
+
+        const auto CACHEKEY = lowerCopy(iconName) + "\n" + std::to_string(targetSize);
+        if (const auto IT = cache.find(CACHEKEY); IT != cache.end())
+            return IT->second;
+
+        std::filesystem::path direct(iconName);
+        if (direct.is_absolute() && std::filesystem::exists(direct) && supportedIconExtension(direct)) {
+            cache[CACHEKEY] = direct;
+            return direct;
+        }
+
+        const auto                           BASE = lowerCopy(std::filesystem::path(iconName).stem().string());
+        const auto                           WANT = std::filesystem::path(iconName).has_extension() ? lowerCopy(std::filesystem::path(iconName).filename().string()) : "";
+
+        std::optional<std::filesystem::path> best;
+        int                                  bestScore = -1;
+
+        std::vector<std::filesystem::path>   searchRoots;
+        for (const auto& dataDir : xdgDataDirs()) {
+            searchRoots.emplace_back(dataDir / "icons");
+            searchRoots.emplace_back(dataDir / "pixmaps");
+        }
+
+        if (const auto HOME = std::getenv("HOME"))
+            searchRoots.emplace_back(std::filesystem::path(HOME) / ".icons");
+
+        std::unordered_set<std::string> seenRoots;
+        for (const auto& root : searchRoots) {
+            const auto rootKey = root.lexically_normal().string();
+            if (!seenRoots.insert(rootKey).second || !std::filesystem::exists(root))
+                continue;
+
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, ec)) {
+                if (ec)
+                    break;
+                if (!entry.is_regular_file(ec) || !supportedIconExtension(entry.path()))
+                    continue;
+
+                const auto FILENAME = lowerCopy(entry.path().filename().string());
+                const auto STEM     = lowerCopy(entry.path().stem().string());
+                if ((!WANT.empty() && FILENAME != WANT) || (WANT.empty() && STEM != BASE))
+                    continue;
+
+                const int score = iconPathScore(entry.path(), targetSize);
+                if (score > bestScore) {
+                    best      = entry.path();
+                    bestScore = score;
+                }
+            }
+        }
+
+        cache[CACHEKEY] = best;
+        return best;
+    }
+
+    SWindowIconTexture& windowIconTextureForClass(const std::string& windowClass, int sizePx) {
+        static std::unordered_map<std::string, SWindowIconTexture> cache;
+
+        const auto                                                 CACHEKEY = lowerCopy(windowClass) + "\n" + std::to_string(sizePx);
+        auto&                                                      cached   = cache[CACHEKEY];
+        if (cached.tex || cached.missing)
+            return cached;
+
+        auto iconName = iconNameForClass(windowClass);
+        if (!iconName)
+            iconName = windowClass;
+
+        const auto ICONPATH = resolveIconPath(*iconName, sizePx);
+        if (!ICONPATH) {
+            cached.missing = true;
+            return cached;
+        }
+
+        Hyprgraphics::CImage image(ICONPATH->string(), Vector2D{sizePx, sizePx});
+        if (!image.success() || !image.cairoSurface() || !image.cairoSurface()->cairo()) {
+            cached.missing = true;
+            return cached;
+        }
+
+        cached.tex    = g_pHyprRenderer->createTexture(image.cairoSurface()->cairo());
+        cached.sizePx = cached.tex ? cached.tex->m_size : Vector2D{};
+        if (!cached.tex || cached.tex->m_texID == 0)
+            cached.missing = true;
+
+        return cached;
+    }
+
+    std::optional<CBox> intersectBoxes(const CBox& a, const CBox& b) {
+        const double x1 = std::max(a.x, b.x);
+        const double y1 = std::max(a.y, b.y);
+        const double x2 = std::min(a.x + a.w, b.x + b.w);
+        const double y2 = std::min(a.y + a.h, b.y + b.h);
+        if (x2 <= x1 || y2 <= y1)
+            return std::nullopt;
+
+        return CBox{x1, y1, x2 - x1, y2 - y1};
+    }
+
+    CBox anchoredBox(const CBox& anchor, double width, double height, const std::string& position, double offX, double offY) {
+        CBox box = {0, 0, width, height};
+
+        if (position == "top-left") {
+            box.x = anchor.x + offX;
+            box.y = anchor.y + offY;
+        } else if (position == "top-right") {
+            box.x = anchor.x + anchor.w - box.w - offX;
+            box.y = anchor.y + offY;
+        } else if (position == "bottom-left") {
+            box.x = anchor.x + offX;
+            box.y = anchor.y + anchor.h - box.h - offY;
+        } else if (position == "bottom-right") {
+            box.x = anchor.x + anchor.w - box.w - offX;
+            box.y = anchor.y + anchor.h - box.h - offY;
+        } else {
+            box.x = anchor.x + (anchor.w - box.w) / 2.0 + offX;
+            box.y = anchor.y + (anchor.h - box.h) / 2.0 + offY;
+        }
+
+        box.round();
+        return box;
+    }
+
+}
 
 void COverview::redrawID(int id, bool forcelowres) {
     if (!pMonitor)
@@ -245,6 +582,16 @@ void COverview::fullRender() {
     static const CConfigValue<Config::INTEGER> PBORDERCURRENT("plugin:hyprexpo:border_color_current");
     static const CConfigValue<Config::INTEGER> PBORDERHOVER("plugin:hyprexpo:border_color_hover");
     static const CConfigValue<Config::INTEGER> PBORDERFOCUS("plugin:hyprexpo:border_color_focus");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONENABLE("plugin:hyprexpo:window_icon_enable");
+    static const CConfigValue<Config::STRING>  PWINDOWICONPOS("plugin:hyprexpo:window_icon_position");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONSIZE("plugin:hyprexpo:window_icon_size");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONOFFX("plugin:hyprexpo:window_icon_offset_x");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONOFFY("plugin:hyprexpo:window_icon_offset_y");
+    static const CConfigValue<Config::FLOAT>   PWINDOWICONALPHA("plugin:hyprexpo:window_icon_alpha");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONBGENABLE("plugin:hyprexpo:window_icon_bg_enable");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONBGCOLOR("plugin:hyprexpo:window_icon_bg_color");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONBGROUND("plugin:hyprexpo:window_icon_bg_rounding");
+    static const CConfigValue<Config::INTEGER> PWINDOWICONBGPAD("plugin:hyprexpo:window_icon_padding");
 
     const double                               outer          = *PGAPOUT * (closing ? (1.0 - size->getPercent()) : size->getPercent());
     Vector2D                                   tileRenderSize = (SIZE - Vector2D{GAPSIZE, GAPSIZE} * (SIDE_LENGTH - 1) - Vector2D{outer * 2, outer * 2}) / SIDE_LENGTH;
@@ -288,6 +635,69 @@ void COverview::fullRender() {
             auto&   image = images[id];
             Render::GL::g_pHyprOpenGL->renderTextureInternal(image.fb->getTexture(), texbox,
                                                              {.damage = &damage, .a = 1.0, .round = tileRoundFor(id, texbox), .roundingPower = roundingPower});
+        }
+    }
+
+    if (*PWINDOWICONENABLE) {
+        const int    iconSizePx = std::max(1, (int)std::lround((double)*PWINDOWICONSIZE * pMonitor->m_scale));
+        const double offX       = *PWINDOWICONOFFX * pMonitor->m_scale;
+        const double offY       = *PWINDOWICONOFFY * pMonitor->m_scale;
+        const double bgPad      = std::max(0, (int)*PWINDOWICONBGPAD) * pMonitor->m_scale;
+        const double alpha      = std::clamp((double)*PWINDOWICONALPHA, 0.0, 1.0);
+
+        for (size_t id = 0; id < images.size(); ++id) {
+            auto& image = images[id];
+            if (image.workspaceID == WORKSPACE_INVALID)
+                continue;
+
+            const auto WORKSPACE = image.pWorkspace ? image.pWorkspace : g_pCompositor->getWorkspaceByID(image.workspaceID);
+            if (!WORKSPACE)
+                continue;
+
+            const CBox&  tileBox = tileBoxes[id];
+            const double scaleX  = tileBox.w / pMonitor->m_size.x;
+            const double scaleY  = tileBox.h / pMonitor->m_size.y;
+
+            for (const auto& window : g_pCompositor->m_windows) {
+                if (!windowVisibleOnWorkspace(window, WORKSPACE))
+                    continue;
+
+                auto* icon = &windowIconTextureForClass(window->m_class.empty() ? window->m_initialClass : window->m_class, iconSizePx);
+                if ((!icon->tex || icon->tex->m_texID == 0 || icon->missing) && !window->m_initialClass.empty() && window->m_initialClass != window->m_class)
+                    icon = &windowIconTextureForClass(window->m_initialClass, iconSizePx);
+                if (!icon->tex || icon->tex->m_texID == 0 || icon->missing)
+                    continue;
+
+                const auto WINDOWBOX = window->getWindowMainSurfaceBox();
+                if (WINDOWBOX.w <= 0 || WINDOWBOX.h <= 0)
+                    continue;
+
+                const CBox previewBox = {
+                    tileBox.x + (WINDOWBOX.x - pMonitor->m_position.x) * scaleX,
+                    tileBox.y + (WINDOWBOX.y - pMonitor->m_position.y) * scaleY,
+                    WINDOWBOX.w * scaleX,
+                    WINDOWBOX.h * scaleY,
+                };
+
+                const auto visibleBox = intersectBoxes(previewBox, tileBox);
+                if (!visibleBox)
+                    continue;
+
+                const double side    = std::min<double>(iconSizePx, std::max(1.0, std::min(visibleBox->w, visibleBox->h)));
+                CBox         iconBox = anchoredBox(*visibleBox, side, side, *PWINDOWICONPOS, offX, offY);
+
+                if (const auto clamped = intersectBoxes(iconBox, tileBox); clamped && (clamped->w < iconBox.w || clamped->h < iconBox.h))
+                    iconBox = anchoredBox(*visibleBox, std::min(side, clamped->w), std::min(side, clamped->h), *PWINDOWICONPOS, offX, offY);
+
+                if (*PWINDOWICONBGENABLE) {
+                    CBox bg = {iconBox.x - bgPad, iconBox.y - bgPad, iconBox.w + bgPad * 2, iconBox.h + bgPad * 2};
+                    bg.round();
+                    Render::GL::g_pHyprOpenGL->renderRect(bg, CHyprColor(*PWINDOWICONBGCOLOR),
+                                                          {.round = std::max(0, (int)std::lround((double)*PWINDOWICONBGROUND * pMonitor->m_scale))});
+                }
+
+                Render::GL::g_pHyprOpenGL->renderTexture(icon->tex, iconBox, {.a = (float)alpha});
+            }
         }
     }
 

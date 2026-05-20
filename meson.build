@@ -38,6 +38,7 @@ src = [
 shared_module(meson.project_name(), src,
   dependencies: [
     dependency('hyprland'),
+    dependency('hyprgraphics'),
     dependency('pixman-1'),
     dependency('libdrm'),
     dependency('pangocairo'),

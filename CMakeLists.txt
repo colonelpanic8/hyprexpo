@@ -29,6 +29,7 @@ add_library(hyprexpo SHARED ${SRC})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     hyprland
+    hyprgraphics
     libdrm
     libinput
     libudev

@@ -32,6 +32,8 @@ plugin {
         border_color_current = rgb(66ccff)
         border_color_hover = rgb(aabbcc)
         border_color_focus = rgb(ffcc66)
+        window_icon_enable = false
+        window_icon_position = bottom-right
 
         gesture_distance = 300 # how far is the "max" for the gesture
         cancel_key = escape # key that cancels the overview without selecting a workspace
@@ -63,6 +65,16 @@ border_width | number | width of current, hover, and keyboard-focus highlight bo
 border_color_current | color | current workspace border color | `rgb(66ccff)`
 border_color_hover | color | hovered workspace border color | `rgb(aabbcc)`
 border_color_focus | color | keyboard-focused workspace border color | `rgb(ffcc66)`
+window_icon_enable | boolean | overlay each previewed window's application icon | `false`
+window_icon_position | string | icon corner within each previewed window: `top-left`, `top-right`, `bottom-left`, `bottom-right`, or `center` | `bottom-right`
+window_icon_size | number | icon size | `32`
+window_icon_offset_x | number | icon horizontal offset from the selected corner | `6`
+window_icon_offset_y | number | icon vertical offset from the selected corner | `6`
+window_icon_alpha | float | icon opacity from `0.0` to `1.0` | `1.0`
+window_icon_bg_enable | boolean | draw a background behind window icons | `true`
+window_icon_bg_color | color | window icon background color | `rgba(00000088)`
+window_icon_bg_rounding | number | window icon background corner radius | `8`
+window_icon_padding | number | window icon background padding | `4`
 label_enable | boolean | show configurable workspace labels | `false`
 label_text_mode | string | label content: `token`, `index`, or `id` | `token`
 label_token_map | string | comma-separated token overrides for `label_text_mode = token`; empty entries hide that token | empty
@@ -140,6 +152,9 @@ hl.config({
             max_workspace = 0,
             show_workspace_numbers = false,
             workspace_number_color = "rgb(ffffff)",
+            window_icon_enable = false,
+            window_icon_position = "bottom-right",
+            window_icon_size = 32,
             label_enable = false,
             label_text_mode = "id",
             label_token_map = "",
