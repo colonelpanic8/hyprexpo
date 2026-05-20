@@ -145,9 +145,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
 
         if (PWORKSPACE) {
             image.pWorkspace        = PWORKSPACE;
-            const auto PREVIOUSWS    = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
-            const auto PREVIEWSTATE  = applyWorkspacePreviewState(PWORKSPACE);
-            const auto WINDOWSTATE   = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
+            const auto PREVIOUSWS   = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
+            const auto PREVIEWSTATE = applyWorkspacePreviewState(PWORKSPACE);
+            const auto WINDOWSTATE  = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
 
             if (PWORKSPACE == startedOn)
                 PMONITOR->m_activeSpecialWorkspace = openSpecial;

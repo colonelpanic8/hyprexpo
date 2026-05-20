@@ -350,7 +350,7 @@ void COverview::updateHoveredFromMouse() {
         return;
 
     const int oldHoveredID = hoveredID;
-    hoveredID             = newHoveredID;
+    hoveredID              = newHoveredID;
 
     if (oldHoveredID != -1)
         followFocusToTile(hoveredID);
