@@ -54,6 +54,11 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
 }
 
 static bool findHookTarget(const std::string& name, SFunctionMatch& target, std::string& error) {
+    if (const auto ADDRESS = HyprlandAPI::getFunctionAddressFromSignature(PHANDLE, name); ADDRESS) {
+        target = {ADDRESS, name, name};
+        return true;
+    }
+
     const auto FNS = HyprlandAPI::findFunctionsByName(PHANDLE, name);
     if (FNS.empty()) {
         error = "no fns for hook " + name;
