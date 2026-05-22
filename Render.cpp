@@ -6,6 +6,7 @@
 #include <glib.h>
 #include <hyprgraphics/image/Image.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 using namespace Hyprutils::String;
 using namespace Internals;
@@ -326,6 +328,14 @@ namespace {
         return result;
     }
 
+    void appendUniqueExistingPath(std::vector<std::filesystem::path>& paths, std::unordered_set<std::string>& seen, const std::filesystem::path& path) {
+        const auto key = path.lexically_normal().string();
+        if (!seen.insert(key).second || !std::filesystem::exists(path))
+            return;
+
+        paths.push_back(path);
+    }
+
     std::vector<std::filesystem::path> iconThemeDirs(const std::string& theme) {
         std::vector<std::filesystem::path> dirs;
 
@@ -353,13 +363,29 @@ namespace {
         if (theme.empty() || !seenThemes.insert(lowerCopy(theme)).second)
             return;
 
-        const auto DIRS = iconThemeDirs(theme);
-        for (const auto& dir : DIRS)
-            roots.push_back(dir);
+        std::unordered_set<std::string> seenRoots;
+        for (const auto& root : roots)
+            seenRoots.insert(root.lexically_normal().string());
 
+        const auto DIRS = iconThemeDirs(theme);
         for (const auto& dir : DIRS) {
             const auto index    = dir / "index.theme";
+            const auto dirs     = iniField(index, "Icon Theme", "Directories");
+            const auto scaled   = iniField(index, "Icon Theme", "ScaledDirectories");
             const auto inherits = iniField(index, "Icon Theme", "Inherits");
+
+            if (dirs) {
+                for (const auto& subdir : splitCommaValues(*dirs))
+                    appendUniqueExistingPath(roots, seenRoots, dir / subdir);
+            }
+
+            if (scaled) {
+                for (const auto& subdir : splitCommaValues(*scaled))
+                    appendUniqueExistingPath(roots, seenRoots, dir / subdir);
+            }
+
+            appendUniqueExistingPath(roots, seenRoots, dir);
+
             if (!inherits)
                 continue;
 
@@ -398,6 +424,50 @@ namespace {
         return score;
     }
 
+    std::vector<std::filesystem::path> iconCandidatesForRoot(const std::filesystem::path& root, const std::string& iconName) {
+        static const std::array<std::string, 8> EXTENSIONS = {".svg", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".jxl", ".avif"};
+
+        std::vector<std::filesystem::path>      candidates;
+        std::unordered_set<std::string>         seen;
+
+        auto                                    addCandidate = [&](const std::filesystem::path& path) {
+            const auto key = path.lexically_normal().string();
+            if (!seen.insert(key).second)
+                return;
+
+            candidates.push_back(path);
+        };
+
+        const auto ICONPATH   = std::filesystem::path(iconName);
+        const bool HASICONEXT = supportedIconExtension(ICONPATH);
+        const auto LOWERNAME  = lowerCopy(iconName);
+
+        if (HASICONEXT) {
+            if (ICONPATH.is_relative())
+                addCandidate(root / ICONPATH);
+            addCandidate(root / ICONPATH.filename());
+
+            const auto LOWERPATH = std::filesystem::path(LOWERNAME);
+            if (LOWERPATH != ICONPATH) {
+                if (LOWERPATH.is_relative())
+                    addCandidate(root / LOWERPATH);
+                addCandidate(root / LOWERPATH.filename());
+            }
+
+            return candidates;
+        }
+
+        for (const auto& ext : EXTENSIONS)
+            addCandidate(root / (iconName + ext));
+
+        if (LOWERNAME != iconName) {
+            for (const auto& ext : EXTENSIONS)
+                addCandidate(root / (LOWERNAME + ext));
+        }
+
+        return candidates;
+    }
+
     std::optional<std::filesystem::path> resolveIconPathInRoots(const std::string& iconName, int targetSize, const std::vector<std::filesystem::path>& roots) {
         if (iconName.empty())
             return std::nullopt;
@@ -414,44 +484,24 @@ namespace {
         std::optional<std::filesystem::path> best;
         int                                  bestScore = -1;
 
-        std::vector<std::filesystem::path>   searchRoots = roots;
         std::unordered_set<std::string>      seenRoots;
-        for (const auto& root : searchRoots)
-            seenRoots.insert(root.lexically_normal().string());
-
-        for (const auto& dataDir : roots) {
-            const auto pixmaps = dataDir / "pixmaps";
-            const auto icons   = dataDir / "icons";
-            if (seenRoots.insert(pixmaps.lexically_normal().string()).second)
-                searchRoots.emplace_back(pixmaps);
-            if (seenRoots.insert(icons.lexically_normal().string()).second)
-                searchRoots.emplace_back(icons);
-        }
-
-        seenRoots.clear();
-        for (const auto& root : searchRoots) {
+        for (const auto& root : roots) {
             const auto rootKey = root.lexically_normal().string();
             if (!seenRoots.insert(rootKey).second || !std::filesystem::exists(root))
                 continue;
 
-            std::error_code ec;
-            const auto      options = std::filesystem::directory_options::skip_permission_denied | std::filesystem::directory_options::follow_directory_symlink;
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(root, options, ec)) {
-                if (ec) {
-                    ec.clear();
-                    continue;
-                }
-                if (!iconFileExists(entry.path()))
+            for (const auto& candidate : iconCandidatesForRoot(root, iconName)) {
+                if (!iconFileExists(candidate))
                     continue;
 
-                const auto FILENAME = lowerCopy(entry.path().filename().string());
-                const auto STEM     = lowerCopy(entry.path().stem().string());
+                const auto FILENAME = lowerCopy(candidate.filename().string());
+                const auto STEM     = lowerCopy(candidate.stem().string());
                 if ((!WANT.empty() && FILENAME != WANT) || (WANT.empty() && STEM != BASE))
                     continue;
 
-                const int score = iconPathScore(entry.path(), targetSize);
+                const int score = iconPathScore(candidate, targetSize);
                 if (score > bestScore) {
-                    best      = entry.path();
+                    best      = candidate;
                     bestScore = score;
                 }
             }
@@ -477,9 +527,6 @@ namespace {
 
         for (const auto& dataDir : xdgDataDirs())
             searchRoots.emplace_back(dataDir / "pixmaps");
-
-        for (const auto& dataDir : xdgDataDirs())
-            searchRoots.emplace_back(dataDir / "icons");
 
         cache[CACHEKEY] = resolveIconPathInRoots(iconName, targetSize, searchRoots);
         return cache[CACHEKEY];
