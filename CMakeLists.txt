@@ -30,6 +30,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     hyprland
     hyprgraphics
+    gio-unix-2.0
     libdrm
     libinput
     libudev

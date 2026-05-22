@@ -1,11 +1,15 @@
 #include "Internals.hpp"
 #include "OverviewPassElement.hpp"
 
+#include <gio/gdesktopappinfo.h>
+#include <gio/gio.h>
+#include <glib.h>
 #include <hyprgraphics/image/Image.hpp>
 
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,6 +24,23 @@ namespace {
         Vector2D             sizePx;
         bool                 missing = false;
     };
+
+    struct GObjectDeleter {
+        void operator()(gpointer ptr) const {
+            if (ptr)
+                g_object_unref(ptr);
+        }
+    };
+
+    struct GKeyFileDeleter {
+        void operator()(GKeyFile* ptr) const {
+            if (ptr)
+                g_key_file_unref(ptr);
+        }
+    };
+
+    using GDesktopAppInfoPtr = std::unique_ptr<GDesktopAppInfo, GObjectDeleter>;
+    using GKeyFilePtr        = std::unique_ptr<GKeyFile, GKeyFileDeleter>;
 
     std::string trimCopy(std::string value) {
         const auto FIRST = value.find_first_not_of(" \t\r\n");
@@ -67,6 +88,16 @@ namespace {
         for (const auto& dir : systemDirs)
             dirs.emplace_back(dir);
 
+        if (const auto HOME = std::getenv("HOME"))
+            dirs.emplace_back(std::filesystem::path(HOME) / ".nix-profile/share");
+
+        if (const auto USER = std::getenv("USER"); USER && *USER)
+            dirs.emplace_back(std::filesystem::path("/etc/profiles/per-user") / USER / "share");
+
+        dirs.emplace_back("/nix/profile/share");
+        dirs.emplace_back("/nix/var/nix/profiles/default/share");
+        dirs.emplace_back("/run/current-system/sw/share");
+
         std::vector<std::filesystem::path> unique;
         std::unordered_set<std::string>    seen;
         for (const auto& dir : dirs) {
@@ -79,42 +110,76 @@ namespace {
         return unique;
     }
 
-    std::optional<std::string> desktopField(const std::filesystem::path& path, const std::string& field) {
-        std::ifstream file(path);
-        if (!file)
+    std::optional<std::string> iniField(const std::filesystem::path& path, const std::string& group, const std::string& field) {
+        GKeyFilePtr keyFile(g_key_file_new());
+        if (!g_key_file_load_from_file(keyFile.get(), path.c_str(), G_KEY_FILE_NONE, nullptr))
             return std::nullopt;
 
-        bool        inDesktopEntry = false;
-        std::string line;
-        while (std::getline(file, line)) {
-            line = trimCopy(line);
-            if (line.empty() || line[0] == '#' || line[0] == ';')
-                continue;
+        const auto VALUE = g_key_file_get_string(keyFile.get(), group.c_str(), field.c_str(), nullptr);
+        if (!VALUE)
+            return std::nullopt;
 
-            if (line.front() == '[' && line.back() == ']') {
-                inDesktopEntry = line == "[Desktop Entry]";
-                continue;
-            }
+        std::string result = trimCopy(VALUE);
+        g_free(VALUE);
+        return result;
+    }
 
-            if (!inDesktopEntry)
-                continue;
-
-            const auto EQ = line.find('=');
-            if (EQ == std::string::npos)
-                continue;
-
-            if (line.substr(0, EQ) == field)
-                return trimCopy(line.substr(EQ + 1));
-        }
-
-        return std::nullopt;
+    std::optional<std::string> desktopField(const std::filesystem::path& path, const std::string& field) {
+        return iniField(path, "Desktop Entry", field);
     }
 
     std::optional<std::string> iconNameFromDesktopFile(const std::filesystem::path& path) {
+        GDesktopAppInfoPtr appInfo(g_desktop_app_info_new_from_filename(path.c_str()));
+        if (appInfo) {
+            GIcon* icon = g_app_info_get_icon(G_APP_INFO(appInfo.get()));
+            if (icon && G_IS_FILE_ICON(icon)) {
+                const auto FILE     = g_file_icon_get_file(G_FILE_ICON(icon));
+                const auto FILEPATH = FILE ? g_file_get_path(FILE) : nullptr;
+                if (FILEPATH) {
+                    std::string result = FILEPATH;
+                    g_free(FILEPATH);
+                    return result;
+                }
+            }
+
+            if (icon && G_IS_THEMED_ICON(icon)) {
+                const auto NAMES = g_themed_icon_get_names(G_THEMED_ICON(icon));
+                if (NAMES && NAMES[0] && *NAMES[0])
+                    return std::string(NAMES[0]);
+            }
+
+            const auto ICONSTRING = icon ? g_icon_to_string(icon) : nullptr;
+            if (ICONSTRING) {
+                std::string result = ICONSTRING;
+                g_free(ICONSTRING);
+                if (!result.empty())
+                    return result;
+            }
+        }
+
         if (const auto ICON = desktopField(path, "Icon"); ICON && !ICON->empty())
             return ICON;
 
         return std::nullopt;
+    }
+
+    std::optional<std::string> startupWMClassFromDesktopFile(const std::filesystem::path& path) {
+        GDesktopAppInfoPtr appInfo(g_desktop_app_info_new_from_filename(path.c_str()));
+        if (appInfo) {
+            const auto STARTUPWMCLASS = g_desktop_app_info_get_startup_wm_class(appInfo.get());
+            if (STARTUPWMCLASS && *STARTUPWMCLASS)
+                return std::string(STARTUPWMCLASS);
+        }
+
+        return desktopField(path, "StartupWMClass");
+    }
+
+    std::optional<std::string> steamAppIDForClass(const std::string& classLower) {
+        const std::string PREFIX = "steam_app_";
+        if (!classLower.starts_with(PREFIX) || classLower.size() == PREFIX.size())
+            return std::nullopt;
+
+        return classLower.substr(PREFIX.size());
     }
 
     std::optional<std::string> iconNameForClass(const std::string& windowClass) {
@@ -163,8 +228,16 @@ namespace {
                         return cache[CLASSLOWER];
                 }
 
-                const auto STARTUPWMCLASS = desktopField(entry.path(), "StartupWMClass");
+                const auto STARTUPWMCLASS = startupWMClassFromDesktopFile(entry.path());
                 if (STARTUPWMCLASS && lowerCopy(*STARTUPWMCLASS) == CLASSLOWER) {
+                    cache[CLASSLOWER] = iconNameFromDesktopFile(entry.path());
+                    if (cache[CLASSLOWER])
+                        return cache[CLASSLOWER];
+                }
+
+                const auto STEAMAPPID = steamAppIDForClass(CLASSLOWER);
+                const auto EXEC       = STEAMAPPID ? desktopField(entry.path(), "Exec") : std::nullopt;
+                if (EXEC && EXEC->find("steam://rungameid/" + *STEAMAPPID) != std::string::npos) {
                     cache[CLASSLOWER] = iconNameFromDesktopFile(entry.path());
                     if (cache[CLASSLOWER])
                         return cache[CLASSLOWER];
@@ -179,6 +252,120 @@ namespace {
     bool supportedIconExtension(const std::filesystem::path& path) {
         const auto EXT = lowerCopy(path.extension().string());
         return EXT == ".png" || EXT == ".svg" || EXT == ".webp" || EXT == ".jpg" || EXT == ".jpeg" || EXT == ".bmp" || EXT == ".jxl" || EXT == ".avif";
+    }
+
+    bool iconFileExists(const std::filesystem::path& path) {
+        if (!supportedIconExtension(path))
+            return false;
+
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(path, ec))
+            return true;
+
+        ec.clear();
+        return std::filesystem::is_symlink(path, ec) && std::filesystem::exists(path, ec);
+    }
+
+    std::optional<std::string> gtkIconThemeNameFromFile(const std::filesystem::path& path) {
+        if (const auto THEME = iniField(path, "Settings", "gtk-icon-theme-name"); THEME && !THEME->empty())
+            return THEME;
+
+        std::ifstream file(path);
+        if (!file)
+            return std::nullopt;
+
+        std::string line;
+        while (std::getline(file, line)) {
+            line = trimCopy(line);
+            if (!line.starts_with("gtk-icon-theme-name"))
+                continue;
+
+            const auto EQ = line.find('=');
+            if (EQ == std::string::npos)
+                continue;
+
+            auto value = trimCopy(line.substr(EQ + 1));
+            if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+                value = value.substr(1, value.size() - 2);
+
+            if (!value.empty())
+                return value;
+        }
+
+        return std::nullopt;
+    }
+
+    std::string configuredIconThemeName() {
+        if (const auto HOME = std::getenv("HOME")) {
+            for (const auto& path : {
+                     std::filesystem::path(HOME) / ".config/gtk-3.0/settings.ini",
+                     std::filesystem::path(HOME) / ".config/gtk-4.0/settings.ini",
+                     std::filesystem::path(HOME) / ".gtkrc-2.0",
+                 }) {
+                if (const auto THEME = gtkIconThemeNameFromFile(path))
+                    return *THEME;
+            }
+        }
+
+        return "hicolor";
+    }
+
+    std::vector<std::string> splitCommaValues(const std::string& value) {
+        std::vector<std::string> result;
+        size_t                   start = 0;
+        while (start <= value.size()) {
+            const size_t end  = value.find(',', start);
+            auto         item = trimCopy(value.substr(start, end == std::string::npos ? std::string::npos : end - start));
+            if (!item.empty())
+                result.push_back(item);
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+
+        return result;
+    }
+
+    std::vector<std::filesystem::path> iconThemeDirs(const std::string& theme) {
+        std::vector<std::filesystem::path> dirs;
+
+        if (const auto HOME = std::getenv("HOME")) {
+            dirs.emplace_back(std::filesystem::path(HOME) / ".icons" / theme);
+            dirs.emplace_back(std::filesystem::path(HOME) / ".local/share/icons" / theme);
+        }
+
+        for (const auto& dataDir : xdgDataDirs())
+            dirs.emplace_back(dataDir / "icons" / theme);
+
+        std::vector<std::filesystem::path> unique;
+        std::unordered_set<std::string>    seen;
+        for (const auto& dir : dirs) {
+            const auto key = dir.lexically_normal().string();
+            if (!seen.insert(key).second || !std::filesystem::exists(dir))
+                continue;
+            unique.push_back(dir);
+        }
+
+        return unique;
+    }
+
+    void appendIconThemeSearchRoots(std::vector<std::filesystem::path>& roots, const std::string& theme, std::unordered_set<std::string>& seenThemes) {
+        if (theme.empty() || !seenThemes.insert(lowerCopy(theme)).second)
+            return;
+
+        const auto DIRS = iconThemeDirs(theme);
+        for (const auto& dir : DIRS)
+            roots.push_back(dir);
+
+        for (const auto& dir : DIRS) {
+            const auto index    = dir / "index.theme";
+            const auto inherits = iniField(index, "Icon Theme", "Inherits");
+            if (!inherits)
+                continue;
+
+            for (const auto& inherited : splitCommaValues(*inherits))
+                appendIconThemeSearchRoots(roots, inherited, seenThemes);
+        }
     }
 
     int iconPathScore(const std::filesystem::path& path, int targetSize) {
@@ -211,48 +398,50 @@ namespace {
         return score;
     }
 
-    std::optional<std::filesystem::path> resolveIconPath(const std::string& iconName, int targetSize) {
-        static std::unordered_map<std::string, std::optional<std::filesystem::path>> cache;
-
+    std::optional<std::filesystem::path> resolveIconPathInRoots(const std::string& iconName, int targetSize, const std::vector<std::filesystem::path>& roots) {
         if (iconName.empty())
             return std::nullopt;
 
-        const auto CACHEKEY = lowerCopy(iconName) + "\n" + std::to_string(targetSize);
-        if (const auto IT = cache.find(CACHEKEY); IT != cache.end())
-            return IT->second;
-
         std::filesystem::path direct(iconName);
-        if (direct.is_absolute() && std::filesystem::exists(direct) && supportedIconExtension(direct)) {
-            cache[CACHEKEY] = direct;
+        if (direct.is_absolute() && iconFileExists(direct))
             return direct;
-        }
 
-        const auto                           BASE = lowerCopy(std::filesystem::path(iconName).stem().string());
-        const auto                           WANT = std::filesystem::path(iconName).has_extension() ? lowerCopy(std::filesystem::path(iconName).filename().string()) : "";
+        const auto                           ICONPATH   = std::filesystem::path(iconName);
+        const bool                           HASICONEXT = supportedIconExtension(ICONPATH);
+        const auto                           BASE       = HASICONEXT ? lowerCopy(ICONPATH.stem().string()) : lowerCopy(iconName);
+        const auto                           WANT       = HASICONEXT ? lowerCopy(ICONPATH.filename().string()) : "";
 
         std::optional<std::filesystem::path> best;
         int                                  bestScore = -1;
 
-        std::vector<std::filesystem::path>   searchRoots;
-        for (const auto& dataDir : xdgDataDirs()) {
-            searchRoots.emplace_back(dataDir / "icons");
-            searchRoots.emplace_back(dataDir / "pixmaps");
+        std::vector<std::filesystem::path>   searchRoots = roots;
+        std::unordered_set<std::string>      seenRoots;
+        for (const auto& root : searchRoots)
+            seenRoots.insert(root.lexically_normal().string());
+
+        for (const auto& dataDir : roots) {
+            const auto pixmaps = dataDir / "pixmaps";
+            const auto icons   = dataDir / "icons";
+            if (seenRoots.insert(pixmaps.lexically_normal().string()).second)
+                searchRoots.emplace_back(pixmaps);
+            if (seenRoots.insert(icons.lexically_normal().string()).second)
+                searchRoots.emplace_back(icons);
         }
 
-        if (const auto HOME = std::getenv("HOME"))
-            searchRoots.emplace_back(std::filesystem::path(HOME) / ".icons");
-
-        std::unordered_set<std::string> seenRoots;
+        seenRoots.clear();
         for (const auto& root : searchRoots) {
             const auto rootKey = root.lexically_normal().string();
             if (!seenRoots.insert(rootKey).second || !std::filesystem::exists(root))
                 continue;
 
             std::error_code ec;
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, ec)) {
-                if (ec)
-                    break;
-                if (!entry.is_regular_file(ec) || !supportedIconExtension(entry.path()))
+            const auto      options = std::filesystem::directory_options::skip_permission_denied | std::filesystem::directory_options::follow_directory_symlink;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(root, options, ec)) {
+                if (ec) {
+                    ec.clear();
+                    continue;
+                }
+                if (!iconFileExists(entry.path()))
                     continue;
 
                 const auto FILENAME = lowerCopy(entry.path().filename().string());
@@ -268,8 +457,60 @@ namespace {
             }
         }
 
-        cache[CACHEKEY] = best;
         return best;
+    }
+
+    std::optional<std::filesystem::path> resolveIconPath(const std::string& iconName, int targetSize) {
+        static std::unordered_map<std::string, std::optional<std::filesystem::path>> cache;
+
+        const auto                                                                   CACHEKEY = lowerCopy(iconName) + "\n" + std::to_string(targetSize);
+        if (const auto IT = cache.find(CACHEKEY); IT != cache.end())
+            return IT->second;
+
+        std::vector<std::filesystem::path> searchRoots;
+        std::unordered_set<std::string>    seenThemes;
+        appendIconThemeSearchRoots(searchRoots, configuredIconThemeName(), seenThemes);
+        appendIconThemeSearchRoots(searchRoots, "hicolor", seenThemes);
+
+        if (const auto HOME = std::getenv("HOME"))
+            searchRoots.emplace_back(std::filesystem::path(HOME) / ".icons");
+
+        for (const auto& dataDir : xdgDataDirs())
+            searchRoots.emplace_back(dataDir / "pixmaps");
+
+        for (const auto& dataDir : xdgDataDirs())
+            searchRoots.emplace_back(dataDir / "icons");
+
+        cache[CACHEKEY] = resolveIconPathInRoots(iconName, targetSize, searchRoots);
+        return cache[CACHEKEY];
+    }
+
+    std::vector<std::string> iconNamesForClass(const std::string& windowClass, int sizePx) {
+        std::vector<std::string>        names;
+        std::unordered_set<std::string> seen;
+
+        auto                            addName = [&](const std::string& name) {
+            if (name.empty())
+                return;
+
+            const auto key = lowerCopy(name);
+            if (!seen.insert(key).second)
+                return;
+
+            names.push_back(name);
+        };
+
+        if (const auto ICON = iconNameForClass(windowClass))
+            addName(*ICON);
+
+        const auto CLASSLOWER = lowerCopy(windowClass);
+        if (const auto STEAMAPPID = steamAppIDForClass(CLASSLOWER))
+            addName("steam_icon_" + *STEAMAPPID);
+
+        addName(windowClass);
+        addName(CLASSLOWER);
+
+        return names;
     }
 
     SWindowIconTexture& windowIconTextureForClass(const std::string& windowClass, int sizePx) {
@@ -280,27 +521,25 @@ namespace {
         if (cached.tex || cached.missing)
             return cached;
 
-        auto iconName = iconNameForClass(windowClass);
-        if (!iconName)
-            iconName = windowClass;
+        for (const auto& iconName : iconNamesForClass(windowClass, sizePx)) {
+            const auto ICONPATH = resolveIconPath(iconName, sizePx);
+            if (!ICONPATH)
+                continue;
 
-        const auto ICONPATH = resolveIconPath(*iconName, sizePx);
-        if (!ICONPATH) {
-            cached.missing = true;
-            return cached;
+            Hyprgraphics::CImage image(ICONPATH->string(), Vector2D{sizePx, sizePx});
+            if (!image.success() || !image.cairoSurface() || !image.cairoSurface()->cairo())
+                continue;
+
+            cached.tex    = g_pHyprRenderer->createTexture(image.cairoSurface()->cairo());
+            cached.sizePx = cached.tex ? cached.tex->m_size : Vector2D{};
+            if (cached.tex && cached.tex->m_texID != 0)
+                return cached;
+
+            cached.tex.reset();
+            cached.sizePx = {};
         }
 
-        Hyprgraphics::CImage image(ICONPATH->string(), Vector2D{sizePx, sizePx});
-        if (!image.success() || !image.cairoSurface() || !image.cairoSurface()->cairo()) {
-            cached.missing = true;
-            return cached;
-        }
-
-        cached.tex    = g_pHyprRenderer->createTexture(image.cairoSurface()->cairo());
-        cached.sizePx = cached.tex ? cached.tex->m_size : Vector2D{};
-        if (!cached.tex || cached.tex->m_texID == 0)
-            cached.missing = true;
-
+        cached.missing = true;
         return cached;
     }
 

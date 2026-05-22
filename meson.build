@@ -39,6 +39,7 @@ shared_module(meson.project_name(), src,
   dependencies: [
     dependency('hyprland'),
     dependency('hyprgraphics'),
+    dependency('gio-unix-2.0'),
     dependency('pixman-1'),
     dependency('libdrm'),
     dependency('pangocairo'),

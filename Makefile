@@ -10,6 +10,6 @@ CXXFLAGS += -shared -fPIC -std=c++2b -Wno-narrowing
 SRC = Config.cpp Dispatchers.cpp ExpoGesture.cpp GestureKeyword.cpp Hooks.cpp Internals.cpp Interaction.cpp LabelRenderer.cpp Overview.cpp OverviewPassElement.cpp Plugin.cpp Render.cpp Swipe.cpp WorkspaceLayout.cpp
 
 all:
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(EXTRA_FLAGS) $(SRC) -o hyprexpo.so `pkg-config --cflags pixman-1 libdrm hyprland hyprgraphics pangocairo libinput libudev wayland-server xkbcommon`
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(EXTRA_FLAGS) $(SRC) -o hyprexpo.so `pkg-config --cflags --libs pixman-1 libdrm hyprland hyprgraphics gio-unix-2.0 pangocairo libinput libudev wayland-server xkbcommon`
 clean:
 	rm -f ./hyprexpo.so
