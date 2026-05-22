@@ -2,7 +2,7 @@
   description = "HyprExpo Hyprland plugin";
 
   inputs = {
-    hyprland.url = "github:hyprwm/Hyprland/v0.55.0";
+    hyprland.url = "github:hyprwm/Hyprland/v0.55.2";
     nixpkgs.follows = "hyprland/nixpkgs";
     systems.follows = "hyprland/systems";
   };
