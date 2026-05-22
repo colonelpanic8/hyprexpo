@@ -8,6 +8,8 @@
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
+#include <initializer_list>
+
 static CFunctionHook* g_pRenderWorkspaceHook = nullptr;
 static CFunctionHook* g_pAddDamageHookA      = nullptr;
 static CFunctionHook* g_pAddDamageHookB      = nullptr;
@@ -62,14 +64,35 @@ static bool findHookTarget(const std::string& name, SFunctionMatch& target, std:
     return true;
 }
 
+static bool findHookTarget(std::initializer_list<const char*> names, const std::string& label, SFunctionMatch& target, std::string& error) {
+    for (const auto* name : names) {
+        if (findHookTarget(name, target, error))
+            return true;
+    }
+
+    error = "no fns for hook " + label;
+    return false;
+}
+
 bool installHooks(std::string& error) {
     SFunctionMatch target;
 
-    if (!findHookTarget("renderWorkspace", target, error))
+    if (!findHookTarget(
+            {
+                "_ZN6Render13IHyprRenderer15renderWorkspaceEN9Hyprutils6Memory14CSharedPointerI8CMonitorEENS3_I10CWorkspaceEERKNSt6chrono10time_pointINS8_3_V212steady_clockENS8_"
+                "8durationIlSt5ratioILl1ELl1000000000EEEEEERKNS1_4Math4CBoxE",
+                "renderWorkspace",
+            },
+            "renderWorkspace", target, error))
         return false;
     g_pRenderWorkspaceHook = HyprlandAPI::createFunctionHook(PHANDLE, target.address, (void*)hkRenderWorkspace);
 
-    if (!findHookTarget("addDamageEPK15pixman_region32", target, error))
+    if (!findHookTarget(
+            {
+                "_ZN8CMonitor9addDamageEPK15pixman_region32",
+                "addDamageEPK15pixman_region32",
+            },
+            "addDamage(pixman_region32)", target, error))
         return false;
     g_pAddDamageHookB = HyprlandAPI::createFunctionHook(PHANDLE, target.address, (void*)hkAddDamageB);
 
