@@ -77,8 +77,14 @@ static bool findHookTarget(std::initializer_list<const char*> names, const std::
 bool installHooks(std::string& error) {
     SFunctionMatch target;
 
+    // These long strings are Itanium C++ ABI-mangled symbol names for the
+    // Hyprland methods being hooked. They identify the exact overload and
+    // signature; run them through c++filt to see the demangled method names.
+    // Short names are kept as compatibility fallbacks where Hyprland can find
+    // the hook target without the full linker symbol.
     if (!findHookTarget(
             {
+                // Render::IHyprRenderer::renderWorkspace(...)
                 "_ZN6Render13IHyprRenderer15renderWorkspaceEN9Hyprutils6Memory14CSharedPointerI8CMonitorEENS3_I10CWorkspaceEERKNSt6chrono10time_pointINS8_3_V212steady_clockENS8_"
                 "8durationIlSt5ratioILl1ELl1000000000EEEEEERKNS1_4Math4CBoxE",
                 "renderWorkspace",
@@ -89,6 +95,7 @@ bool installHooks(std::string& error) {
 
     if (!findHookTarget(
             {
+                // CMonitor::addDamage(pixman_region32 const*)
                 "_ZN8CMonitor9addDamageEPK15pixman_region32",
                 "addDamageEPK15pixman_region32",
             },
@@ -96,6 +103,7 @@ bool installHooks(std::string& error) {
         return false;
     g_pAddDamageHookB = HyprlandAPI::createFunctionHook(PHANDLE, target.address, (void*)hkAddDamageB);
 
+    // CMonitor::addDamage(Hyprutils::Math::CBox const&)
     if (!findHookTarget("_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE", target, error))
         return false;
     g_pAddDamageHookA = HyprlandAPI::createFunctionHook(PHANDLE, target.address, (void*)hkAddDamageA);
