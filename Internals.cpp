@@ -81,7 +81,7 @@ namespace Internals {
         g_pOverview->damage();
     }
 
-    SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace) {
+    SWorkspacePreviewState captureWorkspacePreviewState(const PHLWORKSPACE& workspace) {
         SWorkspacePreviewState state;
         if (!workspace)
             return state;
@@ -93,6 +93,14 @@ namespace Internals {
         state.offsetValue    = workspace->m_renderOffset->value();
         state.offsetGoal     = workspace->m_renderOffset->goal();
 
+        return state;
+    }
+
+    SWorkspacePreviewState applyWorkspacePreviewState(const PHLWORKSPACE& workspace) {
+        const auto state = captureWorkspacePreviewState(workspace);
+        if (!workspace)
+            return state;
+
         workspace->m_visible        = true;
         workspace->m_forceRendering = true;
         workspace->m_alpha->setValueAndWarp(1.F);
@@ -101,6 +109,18 @@ namespace Internals {
         *workspace->m_renderOffset = Vector2D{};
 
         return state;
+    }
+
+    void hideWorkspaceForPreview(const PHLWORKSPACE& workspace) {
+        if (!workspace)
+            return;
+
+        workspace->m_visible        = false;
+        workspace->m_forceRendering = false;
+        workspace->m_alpha->setValueAndWarp(1.F);
+        *workspace->m_alpha = 1.F;
+        workspace->m_renderOffset->setValueAndWarp(Vector2D{});
+        *workspace->m_renderOffset = Vector2D{};
     }
 
     void restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state) {

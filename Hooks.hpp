@@ -11,4 +11,5 @@
 
 bool installHooks(std::string& error);
 void setRenderingOverview(bool rendering);
+void setLivePreviewWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace);
 void renderWorkspaceOriginal(PHLMONITOR monitor, PHLWORKSPACE workspace, const Time::steady_tp& now, const CBox& geometry);

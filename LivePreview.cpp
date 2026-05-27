@@ -30,8 +30,10 @@ void COverview::renderLivePreviewTiles(const std::vector<CBox>& tileBoxes) {
     const auto TIME     = Time::steadyNow();
     const auto OLDWS    = PMONITOR->m_activeWorkspace;
     const auto OLDSPEC  = PMONITOR->m_activeSpecialWorkspace;
+    const auto OLDSTATE = captureWorkspacePreviewState(OLDWS);
 
     g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
+    hideWorkspaceForPreview(OLDWS);
 
     auto renderTile = [&](size_t id) {
         if (!isTileValid(id) || id >= tileBoxes.size())
@@ -62,13 +64,12 @@ void COverview::renderLivePreviewTiles(const std::vector<CBox>& tileBoxes) {
         const auto PREVIOUSWS   = activateWorkspaceForPreview(PMONITOR, ws);
         const auto PREVIEWSTATE = applyWorkspacePreviewState(ws);
 
+        setLivePreviewWorkspace(PMONITOR, ws);
         renderWorkspaceOriginal(PMONITOR, ws, TIME, renderBox);
+        setLivePreviewWorkspace(nullptr, nullptr);
 
         restoreWorkspacePreviewState(ws, PREVIEWSTATE);
         restoreActiveWorkspaceAfterPreview(PMONITOR, PREVIOUSWS);
-
-        if (OLDSPEC && ws == startedOn)
-            PMONITOR->m_activeSpecialWorkspace.reset();
     };
 
     for (size_t id = 0; id < images.size(); ++id) {
@@ -78,6 +79,9 @@ void COverview::renderLivePreviewTiles(const std::vector<CBox>& tileBoxes) {
 
         renderTile(id);
     }
+
+    restoreWorkspacePreviewState(OLDWS, OLDSTATE);
+    PMONITOR->m_activeSpecialWorkspace = OLDSPEC;
 
     for (size_t id = 0; id < images.size(); ++id) {
         const auto ws = images[id].pWorkspace ? images[id].pWorkspace : g_pCompositor->getWorkspaceByID(images[id].workspaceID);
@@ -91,8 +95,5 @@ void COverview::renderLivePreviewTiles(const std::vector<CBox>& tileBoxes) {
     g_pHyprRenderer->m_bBlockSurfaceFeedback = false;
     PMONITOR->m_activeSpecialWorkspace       = OLDSPEC;
     PMONITOR->m_activeWorkspace              = OLDWS;
-    if (startedOn) {
-        startedOn->m_visible = true;
-        g_pDesktopAnimationManager->startAnimation(startedOn, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-    }
+    restoreWorkspacePreviewState(OLDWS, OLDSTATE);
 }

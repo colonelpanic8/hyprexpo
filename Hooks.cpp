@@ -10,18 +10,27 @@
 
 #include <initializer_list>
 
-static CFunctionHook* g_pRenderWorkspaceHook = nullptr;
-static CFunctionHook* g_pAddDamageHookA      = nullptr;
-static CFunctionHook* g_pAddDamageHookB      = nullptr;
+static CFunctionHook* g_pRenderWorkspaceHook    = nullptr;
+static CFunctionHook* g_pAddDamageHookA         = nullptr;
+static CFunctionHook* g_pAddDamageHookB         = nullptr;
+static CFunctionHook* g_pShouldRenderWindowHook = nullptr;
 
 typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
+typedef bool (*origShouldRenderWindow)(void*, PHLWINDOW, PHLMONITOR);
 
-static bool g_renderingOverview = false;
+static bool         g_renderingOverview = false;
+static PHLMONITOR   g_livePreviewMonitor;
+static PHLWORKSPACE g_livePreviewWorkspace;
 
-void        setRenderingOverview(bool rendering) {
+void                setRenderingOverview(bool rendering) {
     g_renderingOverview = rendering;
+}
+
+void setLivePreviewWorkspace(PHLMONITOR monitor, PHLWORKSPACE workspace) {
+    g_livePreviewMonitor   = monitor;
+    g_livePreviewWorkspace = workspace;
 }
 
 void renderWorkspaceOriginal(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
@@ -58,6 +67,24 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
     }
 
     g_pOverview->onDamageReported();
+}
+
+static bool hkShouldRenderWindow(void* thisptr, PHLWINDOW pWindow, PHLMONITOR pMonitor) {
+    const bool result = ((origShouldRenderWindow)(g_pShouldRenderWindowHook->m_original))(thisptr, pWindow, pMonitor);
+
+    if (!result || !g_livePreviewWorkspace || !pWindow || pMonitor != g_livePreviewMonitor)
+        return result;
+
+    if (pWindow->m_pinned)
+        return true;
+
+    if (pWindow->m_workspace == g_livePreviewWorkspace)
+        return true;
+
+    if (pMonitor && pMonitor->m_activeSpecialWorkspace && pWindow->m_workspace == pMonitor->m_activeSpecialWorkspace)
+        return true;
+
+    return false;
 }
 
 static bool findHookTarget(const std::string& name, SFunctionMatch& target, std::string& error) {
@@ -115,9 +142,20 @@ bool installHooks(std::string& error) {
         return false;
     g_pAddDamageHookA = HyprlandAPI::createFunctionHook(PHANDLE, target.address, (void*)hkAddDamageA);
 
+    if (!findHookTarget(
+            {
+                // Render::IHyprRenderer::shouldRenderWindow(PHLWINDOW, PHLMONITOR)
+                "_ZN6Render13IHyprRenderer18shouldRenderWindowEN9Hyprutils6Memory14CSharedPointerI7CWindowEENS3_I8CMonitorEE",
+                "shouldRenderWindow",
+            },
+            "shouldRenderWindow", target, error))
+        return false;
+    g_pShouldRenderWindowHook = HyprlandAPI::createFunctionHook(PHANDLE, target.address, (void*)hkShouldRenderWindow);
+
     bool success = g_pRenderWorkspaceHook->hook();
     success      = success && g_pAddDamageHookA->hook();
     success      = success && g_pAddDamageHookB->hook();
+    success      = success && g_pShouldRenderWindowHook->hook();
 
     if (!success) {
         error = "Failed initializing hooks";

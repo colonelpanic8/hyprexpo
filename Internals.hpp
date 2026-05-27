@@ -65,7 +65,9 @@ namespace Internals {
         Vector2D  sizeGoal;
     };
 
+    SWorkspacePreviewState           captureWorkspacePreviewState(const PHLWORKSPACE& workspace);
     SWorkspacePreviewState           applyWorkspacePreviewState(const PHLWORKSPACE& workspace);
+    void                             hideWorkspaceForPreview(const PHLWORKSPACE& workspace);
     void                             restoreWorkspacePreviewState(const PHLWORKSPACE& workspace, const SWorkspacePreviewState& state);
     std::vector<SWindowPreviewState> applyWorkspaceWindowGoalState(const PHLWORKSPACE& workspace);
     void                             restoreWorkspaceWindowGoalState(const std::vector<SWindowPreviewState>& states);
