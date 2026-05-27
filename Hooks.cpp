@@ -24,6 +24,13 @@ void        setRenderingOverview(bool rendering) {
     g_renderingOverview = rendering;
 }
 
+void renderWorkspaceOriginal(PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
+    if (!g_pRenderWorkspaceHook)
+        return;
+
+    ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(g_pHyprRenderer.get(), pMonitor, pWorkspace, now, geometry);
+}
+
 static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
     if (!g_pOverview || g_renderingOverview || g_pOverview->blockOverviewRendering || g_pOverview->pMonitor != pMonitor)
         ((origRenderWorkspace)(g_pRenderWorkspaceHook->m_original))(thisptr, pMonitor, pWorkspace, now, geometry);

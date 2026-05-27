@@ -8,6 +8,7 @@ project(hyprexpo
 set(CMAKE_CXX_STANDARD 23)
 
 set(SRC
+    CachedPreview.cpp
     Config.cpp
     Dispatchers.cpp
     ExpoGesture.cpp
@@ -16,9 +17,11 @@ set(SRC
     Internals.cpp
     Interaction.cpp
     LabelRenderer.cpp
+    LivePreview.cpp
     Overview.cpp
     OverviewPassElement.cpp
     Plugin.cpp
+    PreviewMode.cpp
     Render.cpp
     Swipe.cpp
     WorkspaceLayout.cpp

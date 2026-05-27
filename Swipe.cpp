@@ -51,7 +51,8 @@ void COverview::onSwipeEnd() {
     *size = pMonitor->m_size;
     *pos  = {0, 0};
 
-    size->setCallbackOnEnd([this](WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) { redrawAll(true); });
+    if (usesCachedPreview())
+        size->setCallbackOnEnd([this](WP<Hyprutils::Animation::CBaseAnimatedVariable> thisptr) { redrawAll(true); });
 
     swipeWasCommenced = false;
     m_isSwiping       = false;

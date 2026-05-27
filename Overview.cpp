@@ -24,11 +24,13 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
     static const CConfigValue<Config::INTEGER> PMAXWS("plugin:hyprexpo:max_workspace");
     static const CConfigValue<Config::INTEGER> PSHOWNUM("plugin:hyprexpo:show_workspace_numbers");
     static const CConfigValue<Config::STRING>  PMETHOD("plugin:hyprexpo:workspace_method");
+    static const CConfigValue<Config::STRING>  PPREVIEWMODE("plugin:hyprexpo:preview_mode");
 
     SIDE_LENGTH          = *PCOLUMNS;
     GAP_WIDTH            = *PGAPS;
     BG_COLOR             = CHyprColor(*PCOL);
     showWorkspaceNumbers = *PSHOWNUM;
+    previewMode          = lowerCopy(*PPREVIEWMODE) == "cached" ? EPreviewMode::CACHED : EPreviewMode::LIVE;
 
     const auto [methodCenter, methodStartID] = workspaceMethodForMonitor(pMonitor.lock(), *PMETHOD);
 
@@ -110,73 +112,9 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         pMonitor->m_activeWorkspace = startedOn;
     }
 
-    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
-
-    Vector2D tileSize       = pMonitor->m_size / SIDE_LENGTH;
-    Vector2D tileRenderSize = (pMonitor->m_size - Vector2D{GAP_WIDTH * pMonitor->m_scale, GAP_WIDTH * pMonitor->m_scale} * (SIDE_LENGTH - 1)) / SIDE_LENGTH;
-    CBox     monbox{0, 0, tileSize.x * 2, tileSize.y * 2};
-
-    if (!ENABLE_LOWRES)
-        monbox = {{0, 0}, pMonitor->m_pixelSize};
-
-    int          currentid = 0;
-
+    Vector2D     tileSize    = pMonitor->m_size / SIDE_LENGTH;
     PHLWORKSPACE openSpecial = PMONITOR->m_activeSpecialWorkspace;
-    if (openSpecial)
-        PMONITOR->m_activeSpecialWorkspace.reset();
-
-    g_pHyprRenderer->m_bBlockSurfaceFeedback = true;
-
-    startedOn->m_visible = false;
-
-    for (size_t i = 0; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
-        COverview::SWorkspaceImage& image = images[i];
-        ensureFramebuffer(image, monbox, framebufferFormatWithAlpha(PMONITOR->m_output->state->state().drmFormat));
-
-        CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
-        g_pHyprRenderer->beginRender(PMONITOR, fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
-
-        clearWithColor(CHyprColor{0, 0, 0, 1.0});
-
-        const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(image.workspaceID);
-
-        if (PWORKSPACE == startedOn)
-            currentid = i;
-
-        if (PWORKSPACE) {
-            image.pWorkspace        = PWORKSPACE;
-            const auto PREVIOUSWS   = activateWorkspaceForPreview(PMONITOR, PWORKSPACE);
-            const auto PREVIEWSTATE = applyWorkspacePreviewState(PWORKSPACE);
-            const auto WINDOWSTATE  = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
-
-            if (PWORKSPACE == startedOn)
-                PMONITOR->m_activeSpecialWorkspace = openSpecial;
-
-            g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
-
-            restoreWorkspaceWindowGoalState(WINDOWSTATE);
-            restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
-            restoreActiveWorkspaceAfterPreview(PMONITOR, PREVIOUSWS);
-            startedOn->m_visible = false;
-
-            if (PWORKSPACE == startedOn)
-                PMONITOR->m_activeSpecialWorkspace.reset();
-        } else
-            g_pHyprRenderer->renderWorkspace(PMONITOR, PWORKSPACE, Time::steadyNow(), monbox);
-
-        image.box = {(i % SIDE_LENGTH) * tileRenderSize.x + (i % SIDE_LENGTH) * GAP_WIDTH, (i / SIDE_LENGTH) * tileRenderSize.y + (i / SIDE_LENGTH) * GAP_WIDTH, tileRenderSize.x,
-                     tileRenderSize.y};
-
-        g_pHyprRenderer->m_renderData.blockScreenShader = true;
-        g_pHyprRenderer->endRender();
-    }
-
-    g_pHyprRenderer->m_bBlockSurfaceFeedback = false;
-
-    PMONITOR->m_activeSpecialWorkspace = openSpecial;
-    PMONITOR->m_activeWorkspace        = startedOn;
-    startedOn->m_visible               = true;
-    g_pDesktopAnimationManager->startAnimation(startedOn, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
+    int          currentid   = usesCachedPreview() ? initializeCachedPreviews(openSpecial) : initializeLivePreviews();
 
     g_pAnimationManager->createAnimation(pMonitor->m_size * pMonitor->m_size / tileSize, size, Config::animationTree()->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
     g_pAnimationManager->createAnimation((-((pMonitor->m_size / (double)SIDE_LENGTH) * Vector2D{currentid % SIDE_LENGTH, currentid / SIDE_LENGTH}) * pMonitor->m_scale) *
@@ -190,7 +128,8 @@ COverview::COverview(PHLWORKSPACE startedOn_, bool swipe_) : startedOn(startedOn
         *size = pMonitor->m_size;
         *pos  = {0, 0};
 
-        size->setCallbackOnEnd([this](auto) { redrawAll(true); });
+        if (usesCachedPreview())
+            size->setCallbackOnEnd([this](auto) { redrawAll(true); });
     }
 
     openedID = currentid;

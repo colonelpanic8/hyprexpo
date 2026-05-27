@@ -5,6 +5,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 #include <hyprgraphics/image/Image.hpp>
+#include <hyprland/src/render/pass/RectPassElement.hpp>
 
 #include <array>
 #include <cstdlib>
@@ -627,87 +628,6 @@ namespace {
 
 }
 
-void COverview::redrawID(int id, bool forcelowres) {
-    if (!pMonitor)
-        return;
-
-    if (pMonitor->m_activeWorkspace != startedOn && !closing) {
-        // likely user changed.
-        onWorkspaceChange();
-    }
-
-    blockOverviewRendering = true;
-
-    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
-
-    id = std::clamp(id, 0, SIDE_LENGTH * SIDE_LENGTH - 1);
-
-    Vector2D tileSize       = pMonitor->m_size / SIDE_LENGTH;
-    Vector2D tileRenderSize = (pMonitor->m_size - Vector2D{GAP_WIDTH, GAP_WIDTH} * (SIDE_LENGTH - 1)) / SIDE_LENGTH;
-    CBox     monbox{0, 0, tileSize.x * 2, tileSize.y * 2};
-
-    if (!forcelowres && (size->value() != pMonitor->m_size || closing))
-        monbox = {{0, 0}, pMonitor->m_pixelSize};
-
-    if (!ENABLE_LOWRES)
-        monbox = {{0, 0}, pMonitor->m_pixelSize};
-
-    auto& image = images[id];
-
-    ensureFramebuffer(image, monbox, framebufferFormatWithAlpha(pMonitor->m_output->state->state().drmFormat));
-
-    CRegion fakeDamage{0, 0, INT16_MAX, INT16_MAX};
-    g_pHyprRenderer->beginRender(pMonitor.lock(), fakeDamage, Render::RENDER_MODE_FULL_FAKE, nullptr, image.fb);
-
-    clearWithColor(CHyprColor{0, 0, 0, 1.0});
-
-    const auto PWORKSPACE = image.pWorkspace ? image.pWorkspace : g_pCompositor->getWorkspaceByID(image.workspaceID);
-    image.pWorkspace      = PWORKSPACE;
-
-    PHLWORKSPACE openSpecial = pMonitor->m_activeSpecialWorkspace;
-    if (openSpecial)
-        pMonitor->m_activeSpecialWorkspace.reset();
-
-    startedOn->m_visible = false;
-
-    if (PWORKSPACE) {
-        const auto PREVIOUSWS   = activateWorkspaceForPreview(pMonitor.lock(), PWORKSPACE);
-        const auto PREVIEWSTATE = applyWorkspacePreviewState(PWORKSPACE);
-        const auto WINDOWSTATE  = PWORKSPACE == startedOn ? std::vector<SWindowPreviewState>{} : applyWorkspaceWindowGoalState(PWORKSPACE);
-
-        if (PWORKSPACE == startedOn)
-            pMonitor->m_activeSpecialWorkspace = openSpecial;
-
-        g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
-
-        restoreWorkspaceWindowGoalState(WINDOWSTATE);
-        restoreWorkspacePreviewState(PWORKSPACE, PREVIEWSTATE);
-        restoreActiveWorkspaceAfterPreview(pMonitor.lock(), PREVIOUSWS);
-
-        if (PWORKSPACE == startedOn)
-            pMonitor->m_activeSpecialWorkspace.reset();
-    } else
-        g_pHyprRenderer->renderWorkspace(pMonitor.lock(), PWORKSPACE, Time::steadyNow(), monbox);
-
-    g_pHyprRenderer->m_renderData.blockScreenShader = true;
-    g_pHyprRenderer->endRender();
-
-    pMonitor->m_activeSpecialWorkspace = openSpecial;
-    pMonitor->m_activeWorkspace        = startedOn;
-    startedOn->m_visible               = true;
-    g_pDesktopAnimationManager->startAnimation(startedOn, CDesktopAnimationManager::ANIMATION_TYPE_IN, true, true);
-
-    blockOverviewRendering = false;
-}
-
-void COverview::redrawAll(bool forcelowres) {
-    if (!pMonitor)
-        return;
-    for (size_t i = 0; i < (size_t)(SIDE_LENGTH * SIDE_LENGTH); ++i) {
-        redrawID(i, forcelowres);
-    }
-}
-
 void COverview::damage() {
     blockDamageReporting = true;
     g_pHyprRenderer->damageMonitor(pMonitor.lock());
@@ -715,6 +635,12 @@ void COverview::damage() {
 }
 
 void COverview::onDamageReported() {
+    if (usesLivePreview()) {
+        damage();
+        g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
+        return;
+    }
+
     damageDirty = true;
 
     Vector2D                                   SIZE = size->value();
@@ -792,6 +718,9 @@ void COverview::close(bool switchToSelection) {
 }
 
 void COverview::onPreRender() {
+    if (usesLivePreview())
+        return;
+
     if (damageDirty) {
         damageDirty = false;
         redrawID(closing ? (closeOnID == -1 ? openedID : closeOnID) : openedID);
@@ -818,20 +747,26 @@ void COverview::onWorkspaceChange() {
 }
 
 void COverview::render() {
+    if (!pMonitor)
+        return;
+
+    if (usesLivePreview()) {
+        CRectPassElement::SRectData data;
+        data.color = BG_COLOR.stripA();
+        data.box   = CBox{{}, pMonitor->m_pixelSize};
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(data));
+        renderLivePreviewTiles(currentTileBoxes());
+    }
+
     g_pHyprRenderer->m_renderPass.add(makeUnique<COverviewPassElement>());
 }
 
 void COverview::fullRender() {
-    const auto GAPSIZE = (closing ? (1.0 - size->getPercent()) : size->getPercent()) * GAP_WIDTH;
-
     if (pMonitor->m_activeWorkspace != startedOn && !closing) {
         // likely user changed.
         onWorkspaceChange();
     }
 
-    Vector2D                                   SIZE = size->value();
-
-    static const CConfigValue<Config::INTEGER> PGAPOUT("plugin:hyprexpo:gap_size_outer");
     static const CConfigValue<Config::INTEGER> PTILEROUND("plugin:hyprexpo:tile_rounding");
     static const CConfigValue<Config::FLOAT>   PROUNDINGPOWER("plugin:hyprexpo:tile_rounding_power");
     static const CConfigValue<Config::INTEGER> PTILEROUNDHOVER("plugin:hyprexpo:tile_rounding_hover");
@@ -879,10 +814,8 @@ void COverview::fullRender() {
     static const CConfigValue<Config::INTEGER> PWINDOWICONBGROUND("plugin:hyprexpo:window_icon_bg_rounding");
     static const CConfigValue<Config::INTEGER> PWINDOWICONBGPAD("plugin:hyprexpo:window_icon_padding");
 
-    const double                               outer          = *PGAPOUT * (closing ? (1.0 - size->getPercent()) : size->getPercent());
-    Vector2D                                   tileRenderSize = (SIZE - Vector2D{GAPSIZE, GAPSIZE} * (SIDE_LENGTH - 1) - Vector2D{outer * 2, outer * 2}) / SIDE_LENGTH;
-
-    clearWithColor(BG_COLOR.stripA());
+    if (usesCachedPreview())
+        clearWithColor(BG_COLOR.stripA());
 
     const int   baseRoundPx    = std::max(0, (int)std::lround((double)*PTILEROUND * pMonitor->m_scale));
     const int   hoverRoundPx   = *PTILEROUNDHOVER >= 0 ? std::max(0, (int)std::lround((double)*PTILEROUNDHOVER * pMonitor->m_scale)) : baseRoundPx;
@@ -890,14 +823,7 @@ void COverview::fullRender() {
     const int   currentRoundPx = *PTILEROUNDCURRENT >= 0 ? std::max(0, (int)std::lround((double)*PTILEROUNDCURRENT * pMonitor->m_scale)) : baseRoundPx;
     const float roundingPower  = *PROUNDINGPOWER;
 
-    auto        tileBoxFor = [&](size_t x, size_t y) {
-        CBox box = {outer + x * tileRenderSize.x + x * GAPSIZE, outer + y * tileRenderSize.y + y * GAPSIZE, tileRenderSize.x, tileRenderSize.y};
-        box.scale(pMonitor->m_scale).translate(pos->value());
-        box.round();
-        return box;
-    };
-
-    auto tileRoundFor = [&](int id, const CBox& box) {
+    auto        tileRoundFor = [&](int id, const CBox& box) {
         int round = baseRoundPx;
         if (id == kbFocusID)
             round = focusRoundPx;
@@ -909,20 +835,17 @@ void COverview::fullRender() {
         return std::min(round, std::max(0, (int)std::floor(std::min(box.w, box.h) / 2.0)));
     };
 
-    std::vector<CBox> tileBoxes(images.size());
+    std::vector<CBox> tileBoxes = currentTileBoxes();
+    if (tileBoxes.size() != images.size())
+        return;
 
-    for (size_t y = 0; y < (size_t)SIDE_LENGTH; ++y) {
-        for (size_t x = 0; x < (size_t)SIDE_LENGTH; ++x) {
-            const int id     = x + y * SIDE_LENGTH;
-            CBox      texbox = tileBoxFor(x, y);
-            tileBoxes[id]    = texbox;
+    std::vector<int> tileRounds(images.size(), 0);
 
-            CRegion damage{0, 0, INT16_MAX, INT16_MAX};
-            auto&   image = images[id];
-            Render::GL::g_pHyprOpenGL->renderTextureInternal(image.fb->getTexture(), texbox,
-                                                             {.damage = &damage, .a = 1.0, .round = tileRoundFor(id, texbox), .roundingPower = roundingPower});
-        }
-    }
+    for (size_t id = 0; id < tileBoxes.size(); ++id)
+        tileRounds[id] = tileRoundFor(id, tileBoxes[id]);
+
+    if (usesCachedPreview())
+        renderCachedPreviewTiles(tileBoxes, tileRounds, roundingPower);
 
     if (*PWINDOWICONENABLE) {
         const int    iconSizePx = std::max(1, (int)std::lround((double)*PWINDOWICONSIZE * pMonitor->m_scale));
@@ -1097,7 +1020,7 @@ void COverview::fullRender() {
 
         const CBox& box = tileBoxes[id];
         Render::GL::g_pHyprOpenGL->renderBorder(box, gradientFromColor(color),
-                                                {.round = tileRoundFor(id, box), .roundingPower = roundingPower, .borderSize = std::max(1, (int)*PBORDERWIDTH)});
+                                                {.round = tileRounds[id], .roundingPower = roundingPower, .borderSize = std::max(1, (int)*PBORDERWIDTH)});
     };
 
     if (hoveredID != -1 && hoveredID != openedID && hoveredID != kbFocusID)

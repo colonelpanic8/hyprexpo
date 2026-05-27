@@ -22,6 +22,7 @@ plugin {
         gap_size = 5
         gap_size_outer = 0
         bg_col = rgb(111111)
+        preview_mode = live # live or cached
         workspace_method = center current # [center/first] [workspace] e.g. first 1 or center m+1
 
         label_enable = false
@@ -50,6 +51,7 @@ gap_size | number | gap between desktops | `5`
 gap_size_outer | number | gap around the outside of the grid | `0`
 bg_col | color | color in gaps (between desktops) | `rgb(000000)`
 workspace_method | [center/first] [workspace] | position of the desktops; comma-separated monitor-specific entries are supported, e.g. `DP-1 first 1, HDMI-A-1 center current, center current` | `center current`
+preview_mode | string | preview backend: `live` re-renders workspaces every frame; `cached` uses framebuffer snapshots | `live`
 skip_empty | boolean | whether the grid displays workspaces sequentially by id using selector "r" (`false`) or skips empty workspaces using selector "m" (`true`) | `false`
 max_workspace | number | highest normal workspace to show when `skip_empty` is `false`; `0` disables the limit | `0`
 show_workspace_numbers | boolean | legacy shortcut to show workspace ID labels | `false`

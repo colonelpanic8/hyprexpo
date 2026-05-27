@@ -54,6 +54,14 @@ class COverview {
     PHLMONITORREF pMonitor;
     bool          m_isSwiping = false;
 
+    enum class EPreviewMode {
+        LIVE,
+        CACHED,
+    };
+
+    bool usesLivePreview() const;
+    bool usesCachedPreview() const;
+
     struct SWorkspaceImage {
         SP<Render::IFramebuffer> fb;
         int64_t                  workspaceID = -1;
@@ -80,6 +88,11 @@ class COverview {
     void                         redrawAll(bool forcelowres = false);
     void                         onWorkspaceChange();
     void                         fullRender();
+    int                          initializeLivePreviews();
+    int                          initializeCachedPreviews(const PHLWORKSPACE& openSpecial);
+    void                         renderLivePreviewTiles(const std::vector<CBox>& tileBoxes);
+    void                         renderCachedPreviewTiles(const std::vector<CBox>& tileBoxes, const std::vector<int>& tileRounds, float roundingPower);
+    std::vector<CBox>            currentTileBoxes() const;
     void                         updateHoveredFromMouse();
     void                         followFocusToTile(int target);
     bool                         isTileValid(int id) const;
@@ -101,6 +114,7 @@ class COverview {
     CHyprColor                   BG_COLOR    = CHyprColor{0.1, 0.1, 0.1, 1.0};
 
     bool                         damageDirty = false;
+    EPreviewMode                 previewMode = EPreviewMode::LIVE;
 
     Vector2D                     lastMousePosLocal = Vector2D{};
 

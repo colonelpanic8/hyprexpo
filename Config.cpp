@@ -27,6 +27,7 @@ void registerConfigValues() {
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:max_workspace", "maximum generated workspace", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:show_workspace_numbers", "show workspace numbers", 0));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprexpo:workspace_number_color", "workspace number color", 0xFFFFFFFF));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:preview_mode", "workspace preview mode", "live"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:gesture_distance", "gesture distance", 200));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprexpo:cancel_key", "cancel key", "escape"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprexpo:tile_rounding", "tile rounding", 0));

@@ -19,6 +19,7 @@ add_project_arguments(
   language: 'cpp')
 
 src = [
+  'CachedPreview.cpp',
   'Config.cpp',
   'Dispatchers.cpp',
   'ExpoGesture.cpp',
@@ -27,9 +28,11 @@ src = [
   'Internals.cpp',
   'Interaction.cpp',
   'LabelRenderer.cpp',
+  'LivePreview.cpp',
   'Overview.cpp',
   'OverviewPassElement.cpp',
   'Plugin.cpp',
+  'PreviewMode.cpp',
   'Render.cpp',
   'Swipe.cpp',
   'WorkspaceLayout.cpp',
