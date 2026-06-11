@@ -24,7 +24,21 @@ static bool         g_renderingOverview = false;
 static PHLMONITOR   g_livePreviewMonitor;
 static PHLWORKSPACE g_livePreviewWorkspace;
 
-void                setRenderingOverview(bool rendering) {
+static bool         livePreviewActiveForMonitor(PHLMONITOR pMonitor) {
+    return g_livePreviewWorkspace && pMonitor && pMonitor == g_livePreviewMonitor;
+}
+
+static bool canConstrainWindowToLivePreviewWorkspace(PHLWINDOW pWindow) {
+    if (!pWindow || !pWindow->m_workspace)
+        return false;
+
+    // Windows being unmapped can still be considered renderable by Hyprland for
+    // fade-out paths. Leave those lifecycle cases to Hyprland's renderer instead
+    // of treating them as stable live-preview workspace members.
+    return pWindow->m_isMapped;
+}
+
+void setRenderingOverview(bool rendering) {
     g_renderingOverview = rendering;
 }
 
@@ -72,16 +86,20 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
 static bool hkShouldRenderWindow(void* thisptr, PHLWINDOW pWindow, PHLMONITOR pMonitor) {
     const bool result = ((origShouldRenderWindow)(g_pShouldRenderWindowHook->m_original))(thisptr, pWindow, pMonitor);
 
-    if (!result || !g_livePreviewWorkspace || !pWindow || pMonitor != g_livePreviewMonitor)
+    if (!result || !livePreviewActiveForMonitor(pMonitor))
+        return result;
+
+    if (!canConstrainWindowToLivePreviewWorkspace(pWindow))
         return result;
 
     if (pWindow->m_pinned)
         return true;
 
-    if (pWindow->m_workspace == g_livePreviewWorkspace)
+    const auto PWINDOWWORKSPACE = pWindow->m_workspace;
+    if (PWINDOWWORKSPACE == g_livePreviewWorkspace)
         return true;
 
-    if (pMonitor && pMonitor->m_activeSpecialWorkspace && pWindow->m_workspace == pMonitor->m_activeSpecialWorkspace)
+    if (pMonitor->m_activeSpecialWorkspace && PWINDOWWORKSPACE == pMonitor->m_activeSpecialWorkspace)
         return true;
 
     return false;
