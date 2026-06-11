@@ -24,11 +24,11 @@ static bool         g_renderingOverview = false;
 static PHLMONITOR   g_livePreviewMonitor;
 static PHLWORKSPACE g_livePreviewWorkspace;
 
-static bool         livePreviewActiveForMonitor(PHLMONITOR pMonitor) {
+static bool         livePreviewActiveForMonitor(const PHLMONITOR& pMonitor) {
     return g_livePreviewWorkspace && pMonitor && pMonitor == g_livePreviewMonitor;
 }
 
-static bool canConstrainWindowToLivePreviewWorkspace(PHLWINDOW pWindow) {
+static bool canConstrainWindowToLivePreviewWorkspace(const PHLWINDOW& pWindow) {
     if (!pWindow || !pWindow->m_workspace)
         return false;
 
@@ -83,8 +83,13 @@ static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
     g_pOverview->onDamageReported();
 }
 
-static bool hkShouldRenderWindow(void* thisptr, PHLWINDOW pWindow, PHLMONITOR pMonitor) {
-    const bool result = ((origShouldRenderWindow)(g_pShouldRenderWindowHook->m_original))(thisptr, pWindow, pMonitor);
+static bool hkShouldRenderWindow(void* thisptr, const PHLWINDOW* pWindowArg, const PHLMONITOR* pMonitorArg) {
+    if (!pWindowArg || !pMonitorArg)
+        return false;
+
+    const PHLWINDOW  pWindow  = *pWindowArg;
+    const PHLMONITOR pMonitor = *pMonitorArg;
+    const bool       result   = ((origShouldRenderWindow)(g_pShouldRenderWindowHook->m_original))(thisptr, pWindow, pMonitor);
 
     if (!result || !livePreviewActiveForMonitor(pMonitor))
         return result;
